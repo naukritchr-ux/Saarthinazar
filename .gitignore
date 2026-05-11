@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# env
+.env
+
+# vite cache
+.vite/
+
+# python
+__pycache__/
+*.pyc
+
+# build folders
+dist/
+build/
+
+# vscode
+.vscode/
