@@ -8,12 +8,12 @@ users = [
     {
         "username": "rashesh",
         "password": "admin123",
-        "role": "admin"
+        "role": "owner"
     },
     {
         "username": "kajal",
         "password": "employee123",
-        "role": "employee"
+        "role": "operations"
     }
 ]
 

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.db_bootstrap import ensure_database
 
 from app.routes import (
     auth,
@@ -9,7 +10,9 @@ from app.routes import (
     alerts,
     topups,
     financial,
-    master_data
+    financial_years,
+    master_data,
+    templates,
 )
 
 app = FastAPI(title="Naukri Usage Monitor")
@@ -28,7 +31,14 @@ app.include_router(invoices.router)
 app.include_router(alerts.router)
 app.include_router(topups.router)
 app.include_router(financial.router)
+app.include_router(financial_years.router)
 app.include_router(master_data.router)
+app.include_router(templates.router)
+
+
+@app.on_event("startup")
+def startup():
+    ensure_database()
 
 
 @app.get("/")
