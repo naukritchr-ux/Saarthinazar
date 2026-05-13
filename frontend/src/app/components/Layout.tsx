@@ -1,7 +1,8 @@
 import {
   Link,
   Outlet,
-  useLocation
+  useLocation,
+  useNavigate
 } from "react-router-dom";
 
 import {
@@ -16,9 +17,13 @@ import {
   LogOut
 } from "lucide-react";
 
+import { useState, useEffect } from "react";
+
 export default function Layout() {
 
   const location = useLocation();
+  const navigate = useNavigate();
+  const [showWelcome, setShowWelcome] = useState(false);
 
   const role =
     localStorage.getItem("role");
@@ -101,9 +106,38 @@ export default function Layout() {
     window.location.href = "/login";
   };
 
+  // Show welcome banner on dashboard load
+  useEffect(() => {
+    if (location.pathname === "/dashboard") {
+      setShowWelcome(true);
+      const timer = setTimeout(() => setShowWelcome(false), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [location.pathname]);
+
   return (
 
     <div className="min-h-screen bg-slate-100">
+
+      {/* WELCOME BANNER */}
+      {showWelcome && (
+        <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-8 py-4 shadow-lg border-b-4 border-purple-800">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">Welcome back, {username}! 👋</h2>
+              <p className="text-purple-100 text-sm mt-1">
+                {role === "admin" ? "You have full system access" : "You're logged in as an employee"}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowWelcome(false)}
+              className="text-purple-100 hover:text-white transition"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
 
@@ -225,7 +259,7 @@ export default function Layout() {
 
                 {/* DROPDOWN MENU */}
 
-                <div className="absolute right-0 mt-3 w-60 bg-white rounded-2xl shadow-xl border border-slate-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                <div className="absolute right-0 mt-3 w-60 bg-white rounded-2xl shadow-xl border border-slate-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
 
                   <div className="p-4 border-b">
 
