@@ -1,5 +1,10 @@
-import { useState } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+} from "react";
 import { Upload, FileSpreadsheet, CheckCircle, X, AlertTriangle, Calendar } from 'lucide-react';
+
 
 interface UploadRecord {
   id: string;
@@ -45,6 +50,9 @@ export default function UploadReports() {
   const [jobPostingFile, setJobPostingFile] = useState<File | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const resdexInputRef = useRef<HTMLInputElement | null>(null);
+
+  const jobsInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -212,6 +220,7 @@ if (response.ok && data.status === 'success') {
             <p className="text-sm text-slate-500 mb-4">or</p>
             <input
               type="file"
+              ref={resdexInputRef}
               id="resdex-upload"
               className="hidden"
               accept=".xls,.xlsx"
@@ -230,7 +239,14 @@ if (response.ok && data.status === 'success') {
                 <CheckCircle className="w-5 h-5 text-green-600" />
                 <span className="text-sm text-green-900">{resdexFile.name}</span>
               </div>
-              <button onClick={() => setResdexFile(null)} className="text-green-600 hover:text-green-700">
+              <button onClick={() => {
+
+  setResdexFile(null);
+
+  if (resdexInputRef.current) {
+    resdexInputRef.current.value = "";
+  }
+}} className="text-green-600 hover:text-green-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -256,9 +272,10 @@ if (response.ok && data.status === 'success') {
             <p className="text-sm text-slate-500 mb-4">or</p>
             <input
               type="file"
+              ref={jobsInputRef}
               id="job-upload"
               className="hidden"
-              accept=".xlsx,.csv"
+              accept=".xlsx,.xls,.csv"
               onChange={(e) => e.target.files && setJobPostingFile(e.target.files[0])}
             />
             <label
@@ -274,7 +291,14 @@ if (response.ok && data.status === 'success') {
                 <CheckCircle className="w-5 h-5 text-green-600" />
                 <span className="text-sm text-green-900">{jobPostingFile.name}</span>
               </div>
-              <button onClick={() => setJobPostingFile(null)} className="text-green-600 hover:text-green-700">
+              <button onClick={() => {
+
+  setJobPostingFile(null);
+
+  if (jobsInputRef.current) {
+    jobsInputRef.current.value = "";
+  }
+}} className="text-green-600 hover:text-green-700">
                 <X className="w-4 h-4" />
               </button>
             </div>

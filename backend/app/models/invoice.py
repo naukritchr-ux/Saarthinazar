@@ -6,7 +6,8 @@ from sqlalchemy import (
     String,
     Float,
     DateTime,
-    Text
+    Text,
+    ForeignKey
 )
 
 from app.database import Base
@@ -16,11 +17,19 @@ class Invoice(Base):
 
     __tablename__ = "invoices"
 
+    # =====================================================
+    # PRIMARY KEY
+    # =====================================================
+
     id = Column(
         Integer,
         primary_key=True,
         index=True
     )
+
+    # =====================================================
+    # BASIC INFO
+    # =====================================================
 
     invoice_number = Column(
         String,
@@ -38,6 +47,40 @@ class Invoice(Base):
         nullable=False
     )
 
+    team_id = Column(
+        Integer,
+        ForeignKey("teams.id"),
+        nullable=True
+    )
+
+    # =====================================================
+    # DATES
+    # =====================================================
+
+    invoice_date = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
+
+    due_date = Column(
+        DateTime,
+        nullable=True
+    )
+
+    payment_date = Column(
+        DateTime,
+        nullable=True
+    )
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
+
+    # =====================================================
+    # AMOUNTS
+    # =====================================================
+
     amount = Column(
         Float,
         default=0
@@ -53,20 +96,35 @@ class Invoice(Base):
         default=0
     )
 
-    due_date = Column(
-        DateTime,
-        nullable=True
+    paid_amount = Column(
+        Float,
+        default=0
     )
 
+    # =====================================================
+    # STATUS
+    # =====================================================
+
+    # OLD FIELD
+    status = Column(
+        String,
+        default="unpaid"
+    )
+
+    # NEW FIELD
     payment_status = Column(
         String,
         default="unpaid"
     )
 
-    payment_date = Column(
-        DateTime,
-        nullable=True
+    invoice_type = Column(
+        String,
+        default="overage"
     )
+
+    # =====================================================
+    # EXTRA
+    # =====================================================
 
     notes = Column(
         Text,
@@ -78,7 +136,7 @@ class Invoice(Base):
         nullable=True
     )
 
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
+    items_json = Column(
+        Text,
+        nullable=True
     )

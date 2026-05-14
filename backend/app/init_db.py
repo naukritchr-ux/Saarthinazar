@@ -1,101 +1,47 @@
-from app.database import (
-    engine,
-    SessionLocal,
-    Base
-)
+from app.database import Base, engine, SessionLocal
 
+# =====================================================
+# IMPORT ALL MODELS
+# =====================================================
+
+from app.models.audit import AuditLog
+from app.models.financial_year import FinancialYear
+from app.models.invoice import Invoice
+from app.models.pricing import PricingPlan
+from app.models.report_upload import ReportUpload
+from app.models.team import Team
+from app.models.topup import TopUp
+from app.models.usage import SubUserUsage
 from app.models.user import User
 
-from app.utils.security import (
-    hash_password
-)
-
-# IMPORT ALL MODELS
-from app.models.team import Team
-from app.models.usage import SubUserUsage
-from app.models.invoice import Invoice
-from app.models.report_upload import ReportUpload
-from app.models.financial_year import FinancialYear
+from app.services.naukri_rules import seed_defaults
 
 
 # =====================================================
-# CREATE TABLES
+# INIT DATABASE
 # =====================================================
 
-Base.metadata.create_all(bind=engine)
+def init():
 
-db = SessionLocal()
+    print("Creating database tables...")
 
+    Base.metadata.create_all(bind=engine)
 
-def create_user(
+    db = SessionLocal()
 
-    username: str,
+    try:
 
-    password: str,
+        print("Seeding default data...")
 
-    role: str
+        seed_defaults(db)
 
-):
+        print("Database initialized successfully.")
 
-    existing = (
+    finally:
 
-        db.query(User)
-
-        .filter(
-            User.username == username
-        )
-
-        .first()
-    )
-
-    if existing:
-
-        print(
-            f"✓ User already exists: {username}"
-        )
-
-        return
-
-    user = User(
-
-        username=username,
-
-        password=hash_password(password),
-
-        role=role
-    )
-
-    db.add(user)
-
-    db.commit()
-
-    print(
-        f"✓ Created user: {username}"
-    )
+        db.close()
 
 
-# =====================================================
-# CREATE DEFAULT USERS
-# =====================================================
+if __name__ == "__main__":
 
-create_user(
-
-    "rashesh",
-
-    "rashesh@123",
-
-    "admin"
-)
-
-create_user(
-
-    "kajal",
-
-    "kajal@123",
-
-    "employee"
-)
-
-print(
-    "\n✓ Database initialized successfully"
-)
+    init()

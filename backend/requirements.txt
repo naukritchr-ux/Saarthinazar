@@ -10,3 +10,5 @@ openpyxl
 xlrd
 google-api-python-client
 google-auth
+xlrd==2.0.1
+pip install xlrd==2.0.1

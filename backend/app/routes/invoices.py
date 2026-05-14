@@ -96,6 +96,8 @@ def generate_invoices(
 
             financial_year=financial_year,
 
+            team_id=team.id,
+
             amount=amount,
 
             gst_amount=gst,
@@ -104,7 +106,11 @@ def generate_invoices(
 
             due_date=datetime.now() + timedelta(days=7),
 
-            payment_status="unpaid"
+            payment_status="unpaid",
+
+            notes="Auto-generated invoice",
+
+            invoice_type="overage"
         )
 
         db.add(invoice)

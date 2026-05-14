@@ -79,3 +79,17 @@ DEFAULT_FINANCIAL_YEAR = os.getenv(
     "DEFAULT_FINANCIAL_YEAR",
     "2026-2027"
 )
+# =====================================================
+# EMAIL (GMAIL SMTP)
+# =====================================================
+
+SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+
+# =====================================================
+# WHATSAPP (TWILIO)
+# =====================================================
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")

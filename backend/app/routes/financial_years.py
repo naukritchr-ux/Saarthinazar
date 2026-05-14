@@ -1,15 +1,57 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
-
+from datetime import date
 from app.database import get_db
 from app.models.financial_year import FinancialYear
 from app.services.naukri_rules import add_audit, financial_year_dates
 
 router = APIRouter(prefix="/financial-years")
 
+def seed_financial_years(db: Session):
 
+    defaults = [
+
+        "2025-2026",
+        "2026-2027",
+        "2027-2028",
+    ]
+
+    for label in defaults:
+
+        existing = (
+
+            db.query(FinancialYear)
+
+            .filter(
+                FinancialYear.label == label
+            )
+
+            .first()
+        )
+
+        if not existing:
+
+            start_date, end_date = financial_year_dates(label)
+
+            db.add(
+
+                FinancialYear(
+
+                    label=label,
+
+                    start_date=start_date,
+
+                    end_date=end_date,
+
+                    is_active=(label == "2025-2026")
+                )
+            )
+
+    db.commit()
 @router.get("/")
 def list_financial_years(db: Session = Depends(get_db)):
+
+    seed_financial_years(db)
     years = db.query(FinancialYear).order_by(FinancialYear.start_date.desc()).all()
     return [
         {

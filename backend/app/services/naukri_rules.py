@@ -128,13 +128,6 @@ def seed_defaults(db: Session):
             )
         db.flush()
 
-    if db.query(SubUserUsage).count() == 0:
-        teams = {team.name: team for team in db.query(Team).all()}
-        for team_name, name, email, cv, nvites, jobs in DEFAULT_USAGE:
-            team = teams.get(team_name)
-            if team:
-                db.add(SubUserUsage(team_id=team.id, team_name=team.name, name=name, email=email, cv_usage=cv, nvites_usage=nvites, jobs_usage=jobs))
-
     if db.query(TopUp).count() == 0:
         talent = db.query(Team).filter(Team.name == "Talent Corner").first()
         global_recruit = db.query(Team).filter(Team.name == "Global Recruit").first()
@@ -142,49 +135,6 @@ def seed_defaults(db: Session):
             db.add(TopUp(team_id=talent.id, team_name=talent.name, cv_topup=1000, nvites_topup=5000, jobs_topup=20, amount=25000, purchase_date=date(2026, 4, 15), added_by="Kajal"))
         if global_recruit:
             db.add(TopUp(team_id=global_recruit.id, team_name=global_recruit.name, cv_topup=500, amount=12500, purchase_date=date(2026, 4, 10), added_by="Kajal"))
-
-    if db.query(ReportUpload).count() == 0:
-        db.add(
-            ReportUpload(
-                resdex_file="Resdex_Usage_01Apr-30Apr.xls",
-                job_posting_file="Job_Posting_01Apr-30Apr.xlsx",
-                uploaded_by="Kajal",
-                range_start=date(2026, 4, 1),
-                range_end=date(2026, 4, 30),
-                status="success",
-                message="Reports uploaded and rolled up by subuser email.",
-            )
-        )
-
-    if db.query(Invoice).count() == 0:
-        teams = {team.name: team for team in db.query(Team).all()}
-        seed_invoices = [
-            ("INV-2026-001", "Talent Corner", "topup", date(2026, 4, 15), date(2026, 4, 30), 45000, 0, "Unpaid", "Top-up and usage overage follow-up"),
-            ("INV-2026-002", "HR Solutions", "licence", date(2026, 4, 1), date(2026, 4, 25), 80000, 80000, "Paid", "Licence fee received"),
-            ("INV-2026-003", "Staffing Pro", "licence", date(2026, 4, 1), date(2026, 5, 10), 160000, 100000, "Partially paid", "Part payment received"),
-            ("INV-2026-004", "Global Recruit", "overage", date(2026, 4, 10), date(2026, 4, 25), 65000, 0, "Unpaid", "Overage invoice pending"),
-            ("INV-2026-005", "Smart Hire", "licence", date(2026, 4, 1), date(2026, 5, 5), 80000, 80000, "Paid", "Licence fee received"),
-        ]
-        for number, team_name, invoice_type, invoice_date, due_date, amount, paid_amount, status, notes in seed_invoices:
-            team = teams.get(team_name)
-            db.add(
-                Invoice(
-                    invoice_number=number,
-                    team_id=team.id if team else None,
-                    partner_name=team_name,
-                    invoice_type=invoice_type,
-                    invoice_date=invoice_date,
-                    due_date=due_date,
-                    amount=amount,
-                    paid_amount=paid_amount,
-                    status=status,
-                    payment_date=invoice_date if status == "Paid" else None,
-                    notes=notes,
-                    items_json=json.dumps([{"label": notes, "total": amount}]),
-                )
-            )
-    db.commit()
-
 
 def parse_date(value) -> date | None:
     if isinstance(value, date):
@@ -194,7 +144,19 @@ def parse_date(value) -> date | None:
     if value is None:
         return None
     text = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y"):
+    formats = (
+        "%Y-%m-%d",      # 2025-04-01
+        "%d-%m-%Y",      # 01-04-2025
+        "%d/%m/%Y",      # 01/04/2025
+        "%d %b %Y",      # 01 Apr 2025
+        "%d %B %Y",      # 01 April 2025
+        "%d-%b-%Y",      # 01-Apr-2025
+        "%d-%b-%y",      # 01-Apr-25
+        "%d/%b/%Y",      # 01/Apr/2025
+        "%d/%b/%y",      # 01/Apr/25
+        "%d %b %y",      # 01 Apr 25
+    )
+    for fmt in formats:
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
@@ -208,6 +170,8 @@ def parse_date_range_from_text(text: str) -> tuple[date | None, date | None]:
     parsed = [item for item in parsed if item]
     if len(parsed) >= 2:
         return parsed[0], parsed[1]
+    print("WARNING: Could not extract 2 dates from text:", text)
+    print("Parsed candidates:", parsed)
     return None, None
 
 
@@ -231,8 +195,34 @@ def default_pricing_plan(db: Session) -> PricingPlan | None:
     )
 
 
-def create_team_from_upload(db: Session, team_name: str, partner_email: str, partner_name: str = "", licences: int = 1) -> Team:
+def create_team_from_upload(
+    db: Session,
+    team_name: str,
+    partner_email: str,
+    partner_name: str = "",
+    licences: int = 1,
+) -> Team:
+
+    # Clean incoming values
+    team_name = str(team_name).strip()
+    partner_email = str(partner_email).strip()
+
+    # Handle invalid/missing team names
+    if not team_name or team_name.lower() in {"0", "nan", "none"}:
+        team_name = f"Unassigned-{partner_email}"
+
+    # Prevent duplicate team creation
+    existing_team = (
+        db.query(Team)
+        .filter(Team.name == team_name)
+        .first()
+    )
+
+    if existing_team:
+        return existing_team
+
     plan = default_pricing_plan(db)
+
     team = Team(
         name=team_name,
         partner_name=partner_name or team_name,
@@ -247,58 +237,76 @@ def create_team_from_upload(db: Session, team_name: str, partner_email: str, par
         jobs_limit=(plan.jobs_limit if plan else 0) * licences,
         is_active=True,
     )
+
     db.add(team)
     db.flush()
+
     add_audit(
         db,
         "system",
         "auto_create_team_from_upload",
         "team",
         team.id,
-        {"team_name": team_name, "partner_email": partner_email, "licences": licences},
+        {
+            "team_name": team_name,
+            "partner_email": partner_email,
+            "licences": licences,
+        },
     )
+
     return team
 
 
-def validate_report_ranges(resdex_range: tuple[date | None, date | None], job_range: tuple[date | None, date | None], financial_year: str):
-    start = financial_year_start(financial_year)
-    if not resdex_range[0] or not job_range[0] or resdex_range[0] != start or job_range[0] != start:
-        raise HTTPException(status_code=400, detail=f"Report must start from {start.strftime('%d %b %Y')}. Please re-download from Naukri.")
-    if resdex_range != job_range:
-        raise HTTPException(status_code=400, detail=f"Report date mismatch. Please upload both reports from {start.strftime('%d %b %Y')} to today.")
-
-
-def usage_totals(
-    db: Session,
-    team_id: int,
-    financial_year: str
+def validate_report_ranges(
+    resdex_range: tuple[date | None, date | None],
+    job_range: tuple[date | None, date | None],
+    financial_year: str,
 ):
+    print("VALIDATING FY:", financial_year)
+    print("RESDEX RANGE:", resdex_range)
+    print("JOB RANGE:", job_range)
 
-    rows = (
+    start = financial_year_start(financial_year)
 
-        db.query(SubUserUsage)
-
-        .filter(
-
-            SubUserUsage.team_id == team_id,
-
-            SubUserUsage.financial_year == financial_year
-
+    # FIX: validate each range separately with clear error messages
+    if not resdex_range[0]:
+        raise HTTPException(status_code=400, detail="Could not parse date range from Resdex report. Please re-download from Naukri.")
+    if not job_range[0]:
+        raise HTTPException(status_code=400, detail="Could not parse date range from Job Posting report. Please re-download from Naukri.")
+    if resdex_range[0] != start:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Resdex report must start from {start.strftime('%d %b %Y')} (Financial Year {financial_year}). "
+                   f"Report starts from {resdex_range[0].strftime('%d %b %Y')}. Please re-download from Naukri.",
+        )
+    if job_range[0] != start:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job Posting report must start from {start.strftime('%d %b %Y')} (Financial Year {financial_year}). "
+                   f"Report starts from {job_range[0].strftime('%d %b %Y')}. Please re-download from Naukri.",
+        )
+    if resdex_range != job_range:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Report date mismatch. Resdex: {resdex_range}, Job Posting: {job_range}. "
+                   f"Please upload both reports for the same date range from {start.strftime('%d %b %Y')} to today.",
         )
 
+
+def usage_totals(db: Session, team_id: int, financial_year: str) -> dict:
+    # FIX: clean formatting, consistent signature
+    rows = (
+        db.query(SubUserUsage)
+        .filter(
+            SubUserUsage.team_id == team_id,
+            SubUserUsage.financial_year == financial_year,
+        )
         .all()
     )
-
     return {
-
-        "cv":
-            sum(row.cv_usage or 0 for row in rows),
-
-        "nvites":
-            sum(row.nvites_usage or 0 for row in rows),
-
-        "jobs":
-            sum(row.jobs_usage or 0 for row in rows),
+        "cv": sum(row.cv_usage or 0 for row in rows),
+        "nvites": sum(row.nvites_usage or 0 for row in rows),
+        "jobs": sum(row.jobs_usage or 0 for row in rows),
     }
 
 
@@ -336,65 +344,38 @@ def status_for_percent(value: int) -> str:
     return "Safe"
 
 
-def status_for_team(
-
-    team: Team,
-
-    db: Session,
-
-    financial_year: str
-
-):
-
-    usage = usage_totals(
-        db,
-        team.id,
-        financial_year
-    )
-
+def status_for_team(team: Team, db: Session, financial_year: str) -> str:
+    # FIX: clean formatting, pass financial_year correctly
+    usage = usage_totals(db, team.id, financial_year)
     limits = team_limits(team, db)
-
     return status_for_percent(
-
-        max(
-
-            usage_percent(
-                usage[key],
-                limits[key]
-            )
-
-            for key in INVENTORY_TYPES
-        )
+        max(usage_percent(usage[key], limits[key]) for key in INVENTORY_TYPES)
     )
+
 
 def outstanding_for_team(db: Session, team_id: int) -> float:
     invoices = db.query(Invoice).filter(Invoice.team_id == team_id, Invoice.status != "Paid").all()
     return sum(max(0, (invoice.amount or 0) - (invoice.paid_amount or 0)) for invoice in invoices)
 
 
-def team_payload(team: Team, db: Session, include_financial: bool = False) -> dict:
-    usage = usage_totals(
-    db,
-    team.id,
-    financial_year
-)
+def team_payload(team: Team, db: Session, financial_year: str, include_financial: bool = False) -> dict:
+    # FIX: financial_year was missing as a parameter; was using undefined variable
+    usage = usage_totals(db, team.id, financial_year)
     topups = topup_totals(db, team.id)
     limits = team_limits(team, db)
     percentages = {key: usage_percent(usage[key], limits[key]) for key in INVENTORY_TYPES}
+
+    # FIX: removed duplicate/broken chained .filter() call on the query result
     subusers = (
-
-    db.query(SubUserUsage)
-
-    .filter(
-        SubUserUsage.team_id == team.id,
-
-        SubUserUsage.financial_year == financial_year
+        db.query(SubUserUsage)
+        .filter(
+            SubUserUsage.team_id == team.id,
+            SubUserUsage.financial_year == financial_year,
+        )
+        .order_by(SubUserUsage.name)
+        .all()
     )
 
-    .order_by(SubUserUsage.name)
-
-    .all()
-).filter(SubUserUsage.team_id == team.id).order_by(SubUserUsage.name).all()
     payload = {
         "id": team.id,
         "name": team.name,
@@ -412,22 +393,34 @@ def team_payload(team: Team, db: Session, include_financial: bool = False) -> di
         "status": status_for_percent(max(percentages.values())),
         "outstanding_invoice": outstanding_for_team(db, team.id),
         "subusers": [
-            {"id": row.id, "name": row.name, "email": row.email, "cv_usage": row.cv_usage, "nvites_usage": row.nvites_usage, "jobs_usage": row.jobs_usage}
+            {
+                "id": row.id,
+                "name": row.name,
+                "email": row.email,
+                "cv_usage": row.cv_usage,
+                "nvites_usage": row.nvites_usage,
+                "jobs_usage": row.jobs_usage,
+            }
             for row in subusers
         ],
     }
     if include_financial:
-        revenue = (team.licence_fee or 0) + sum(invoice.amount or 0 for invoice in db.query(Invoice).filter(Invoice.team_id == team.id).all())
-        payload.update({"licence_fee": team.licence_fee or 0, "cost_share": team.cost_share or 0, "revenue": revenue, "profit": revenue - (team.cost_share or 0)})
+        revenue = (team.licence_fee or 0) + sum(
+            invoice.amount or 0
+            for invoice in db.query(Invoice).filter(Invoice.team_id == team.id).all()
+        )
+        payload.update({
+            "licence_fee": team.licence_fee or 0,
+            "cost_share": team.cost_share or 0,
+            "revenue": revenue,
+            "profit": revenue - (team.cost_share or 0),
+        })
     return payload
 
 
-def overage_items(team: Team, db: Session) -> list[dict]:
-    usage = usage_totals(
-    db,
-    team.id,
-    financial_year
-)
+def overage_items(team: Team, db: Session, financial_year: str) -> list[dict]:
+    # FIX: financial_year was missing as a parameter; was using undefined variable
+    usage = usage_totals(db, team.id, financial_year)
     limits = team_limits(team, db)
     items = []
     for key in INVENTORY_TYPES:
@@ -461,6 +454,7 @@ def create_invoice(db: Session, team: Team, invoice_type: str, items: list[dict]
     amount = sum(item["total"] for item in items)
     invoice = Invoice(
         invoice_number=next_invoice_number(db),
+        financial_year="2025-2026",
         team_id=team.id,
         partner_name=team.name,
         invoice_type=invoice_type,
@@ -500,16 +494,35 @@ def invoice_payload(invoice: Invoice) -> dict:
 
 def invoice_summary(invoices: Iterable[Invoice]) -> dict:
     invoices = list(invoices)
-    outstanding = sum(max(0, (invoice.amount or 0) - (invoice.paid_amount or 0)) for invoice in invoices if invoice.status != "Paid")
+    outstanding = sum(
+        max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
+        for invoice in invoices
+        if invoice.status != "Paid"
+    )
     paid = sum(invoice.paid_amount or 0 for invoice in invoices)
-    partial_pending = sum(max(0, (invoice.amount or 0) - (invoice.paid_amount or 0)) for invoice in invoices if invoice.status == "Partially paid")
-    overdue = sum(max(0, (invoice.amount or 0) - (invoice.paid_amount or 0)) for invoice in invoices if invoice.status != "Paid" and invoice.due_date and invoice.due_date < date.today())
-    return {"outstanding": outstanding, "paid": paid, "partial_pending": partial_pending, "overdue": overdue, "pending_count": len([i for i in invoices if i.status != "Paid"])}
+    partial_pending = sum(
+        max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
+        for invoice in invoices
+        if invoice.status == "Partially paid"
+    )
+    overdue = sum(
+        max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
+        for invoice in invoices
+        if invoice.status != "Paid" and invoice.due_date and invoice.due_date < date.today()
+    )
+    return {
+        "outstanding": outstanding,
+        "paid": paid,
+        "partial_pending": partial_pending,
+        "overdue": overdue,
+        "pending_count": len([i for i in invoices if i.status != "Paid"]),
+    }
 
 
-def alert_message(team: Team, db: Session) -> dict:
-    payload = team_payload(team, db)
-    items = overage_items(team, db)
+def alert_message(team: Team, db: Session, financial_year: str) -> dict:
+    # FIX: financial_year was missing as a parameter; was using undefined variable
+    payload = team_payload(team, db, financial_year)
+    items = overage_items(team, db, financial_year)
     overage_amount = sum(item["total"] for item in items)
     lines = [
         f"Usage Alert: {team.name}",
@@ -520,8 +533,125 @@ def alert_message(team: Team, db: Session) -> dict:
         f"Job Postings: {payload['usage']['jobs']} / {payload['total_limits']['jobs']} ({payload['usage_percent']['jobs']}%)",
         "Member-wise breakdown:",
     ]
-    lines.extend(f"- {row['name']} ({row['email']}): CV {row['cv_usage']}, NVites {row['nvites_usage']}, Jobs {row['jobs_usage']}" for row in payload["subusers"])
+    lines.extend(
+        f"- {row['name']} ({row['email']}): CV {row['cv_usage']}, NVites {row['nvites_usage']}, Jobs {row['jobs_usage']}"
+        for row in payload["subusers"]
+    )
     if overage_amount:
         lines.append(f"Overage invoice amount including GST: Rs {round(overage_amount)}")
     lines.append("Please review your usage and plan accordingly.")
     return {"team": payload, "overage_items": items, "overage_amount": overage_amount, "message": "\n".join(lines)}
+
+
+# ---------------------------------------------------------------------------
+# Report parsing helpers — used by the upload route
+# ---------------------------------------------------------------------------
+
+def parse_job_posting_report(filepath: str) -> tuple[tuple[date | None, date | None], list[dict]]:
+    """
+    Parse the Job Posting report (xlsx).
+
+    Expected layout (0-indexed rows):
+      Row 0: ['Job Posting Report - Sub User Wise', ...]
+      Row 2: ['Duration:', '01-Apr-25 To 31-Mar-26', ...]
+      Row 4: ['Sub User', 'Alias', 'Jobs Post Expense', ...]
+      Row 5+: data rows
+
+    Returns:
+        (date_range, rows)
+        date_range: (start_date, end_date) parsed from row 2 col 1
+        rows: list of dicts with keys 'email', 'jobs_usage'
+    """
+    import pandas as pd
+
+    raw = pd.read_excel(filepath, header=None)
+
+    # Row 2, col 1 contains the date range string e.g. "01-Apr-25 To 31-Mar-26"
+    date_range_text = str(raw.iloc[2, 1]).strip()
+    print("JOB HEADER:", date_range_text)
+    date_range = parse_date_range_from_text(date_range_text)
+
+    # Row 4 is the real header; data starts at row 5
+    # The sub-user column is named "Sub User" (col 0 = email)
+    df = pd.read_excel(filepath, header=4)
+    # Rename the sub-user column — in some exports it appears as "Sub" or "Sub User"
+    sub_col = next(
+        (c for c in df.columns if str(c).strip().lower().startswith("sub")),
+        df.columns[0],
+    )
+    df = df.rename(columns={sub_col: "email"})
+    df["email"] = df["email"].astype(str).str.strip().str.lower()
+
+    # Drop summary/empty rows (no @ in email)
+    df = df[df["email"].str.contains("@", na=False)]
+
+    # Total Job Expense is the last column or "Total Job Expense"
+    job_col = next(
+        (c for c in df.columns if "total" in str(c).lower() and "job" in str(c).lower()),
+        df.columns[-1],
+    )
+    df["jobs_usage"] = pd.to_numeric(df[job_col], errors="coerce").fillna(0).astype(int)
+
+    rows = df[["email", "jobs_usage"]].to_dict("records")
+    return date_range, rows
+
+
+def parse_resdex_report(filepath: str) -> tuple[tuple[date | None, date | None], list[dict]]:
+    """
+    Parse the Resdex Usage report (.xls).
+
+    Expected layout (0-indexed rows):
+      Row 0: 'Report Type: Summary      Duration: 01-Apr-25 To 31-Mar-26'
+      Row 1: ['Subuser', 'Team Name', 'NVites', 'Unique CV Views...', ..., 'CV Access By Company (A+B+C)', ...]
+      Row 2+: data rows — Subuser col format: "Name | email@domain.com"
+
+    Returns:
+        (date_range, rows)
+        date_range: (start_date, end_date) parsed from row 0 col 0
+        rows: list of dicts with keys 'email', 'cv_usage', 'nvites_usage'
+    """
+    import pandas as pd
+
+    raw = pd.read_excel(filepath, engine="xlrd", header=None)
+
+    # Row 0, col 0 contains the full header string with duration
+    header_text = str(raw.iloc[0, 0]).strip()
+    print("RESDEX HEADER:", header_text)
+    date_range = parse_date_range_from_text(header_text)
+
+    # Row 1 is the real header
+    df = pd.read_excel(filepath, engine="xlrd", header=1)
+
+    # Subuser column: "Name | email@domain.com"
+    sub_col = next(
+        (c for c in df.columns if str(c).strip().lower() == "subuser"),
+        df.columns[0],
+    )
+    df["email"] = (
+        df[sub_col]
+        .astype(str)
+        .str.extract(r"\|\s*([^\s|]+@[^\s|]+)")
+        [0]
+        .str.strip()
+        .str.lower()
+    )
+
+    # Drop rows where we couldn't parse an email
+    df = df[df["email"].notna() & df["email"].str.contains("@", na=False)]
+
+    # NVites column
+    nvites_col = next(
+        (c for c in df.columns if str(c).strip().lower() == "nvites"),
+        None,
+    )
+    # CV Access By Company (A+B+C) is the total CV access column
+    cv_col = next(
+        (c for c in df.columns if "a+b+c" in str(c).lower() or "cv access by company" in str(c).lower()),
+        None,
+    )
+
+    df["cv_usage"] = pd.to_numeric(df[cv_col], errors="coerce").fillna(0).astype(int) if cv_col else 0
+    df["nvites_usage"] = pd.to_numeric(df[nvites_col], errors="coerce").fillna(0).astype(int) if nvites_col else 0
+
+    rows = df[["email", "cv_usage", "nvites_usage"]].to_dict("records")
+    return date_range, rows

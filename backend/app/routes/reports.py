@@ -24,7 +24,7 @@ from app.services.naukri_rules import (
     create_team_from_upload
 )
 
-from services.report_processor import ReportProcessor
+from app.services.report_processor import ReportProcessor
 
 
 router = APIRouter(prefix="/reports")

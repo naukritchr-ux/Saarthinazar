@@ -1,0 +1,795 @@
+"""
+app/services/report_processor.py
+"""
+
+from html.parser import HTMLParser
+from pathlib import Path
+
+import pandas as pd
+
+from app.services.naukri_rules import (
+    parse_date_range_from_text,
+    validate_report_ranges,
+)
+
+
+class ReportProcessor:
+    """
+    Reads Naukri reports,
+    validates financial year range,
+    normalizes usage data,
+    and merges reports by email.
+    """
+
+    EMAIL_ALIASES = (
+        "email",
+        "email id",
+        "subuser email",
+        "sub user email",
+        "subuser email id",
+        "user email",
+    )
+
+    NAME_ALIASES = (
+        "name",
+        "subuser",
+        "sub user",
+        "user name",
+        "subuser name",
+    )
+
+    TEAM_ALIASES = (
+        "team",
+        "team name",
+        "company",
+        "partner",
+        "franchise",
+    )
+
+    CV_ALIASES = (
+        "cv access by company",
+        "cv access total",
+        "cv access",
+        "resumes",
+        "resume access",
+        "cv used",
+    )
+
+    NVITES_ALIASES = (
+        "nvites",
+        "n-vites",
+        "mass mails",
+        "mass mail",
+        "nvites used",
+    )
+
+    JOB_ALIASES = (
+        "total job expense",
+        "job postings",
+        "jobs",
+        "jobs used",
+        "posting usage",
+    )
+
+    # =====================================================
+    # INTERNAL — HTML CELL EXTRACTOR
+    # =====================================================
+
+    class _CellExtractor(HTMLParser):
+
+        def __init__(self):
+
+            super().__init__()
+
+            self.first_cell = ""
+
+            self._in_cell = False
+
+            self._done = False
+
+        def handle_starttag(self, tag, attrs):
+
+            if not self._done and tag in ("td", "th"):
+
+                self._in_cell = True
+
+        def handle_endtag(self, tag):
+
+            if tag in ("td", "th"):
+
+                self._in_cell = False
+
+        def handle_data(self, data):
+
+            if self._in_cell and not self._done:
+
+                text = data.strip()
+
+                if text:
+
+                    self.first_cell = text
+
+                    self._done = True
+
+    # =====================================================
+    # INTERNAL — DETECT HTML XLS
+    # =====================================================
+
+    def _is_html_file(
+        self,
+        path: str
+    ) -> bool:
+
+        try:
+
+            with open(path, "rb") as file:
+
+                header = file.read(200)
+
+            return b"<html" in header.lower()
+
+        except Exception:
+
+            return False
+
+    # =====================================================
+    # INTERNAL — READ HTML XLS
+    # =====================================================
+
+    def _read_html_xls(
+        self,
+        path: str,
+        header_row: int = 1,
+    ) -> pd.DataFrame:
+
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+            errors="ignore"
+        ) as file:
+
+            content = file.read()
+
+        if "shLink" in content and "sheet001.htm" in content:
+
+            stem = Path(path).stem
+
+            raise ValueError(
+
+                f"The file '{Path(path).name}' is a "
+                f"multi-part HTML Workbook.\n\n"
+
+                f"Its actual data exists inside:\n"
+                f"'{stem}_files/sheet001.htm'\n\n"
+
+                f"Please:\n"
+                f"1. Open the file in Excel\n"
+                f"2. File → Save As\n"
+                f"3. Save as .xlsx or .csv\n"
+                f"4. Upload again."
+            )
+
+        import io
+
+        tables = pd.read_html(
+            io.StringIO(content),
+            header=header_row,
+        )
+
+        if not tables:
+
+            raise ValueError(
+                f"No table found inside '{Path(path).name}'."
+            )
+
+        return tables[0]
+
+    # =====================================================
+    # READ FILE
+    # =====================================================
+
+    def _read_file(
+        self,
+        path: str,
+    ) -> pd.DataFrame:
+
+        suffix = Path(path).suffix.lower()
+
+        filename = Path(path).name.lower()
+
+        # ==========================================
+        # DETECT HEADER ROW
+        # ==========================================
+
+        # Resdex → row 1
+        # Job Posting → row 4
+
+        header_row = 1
+
+        if "job" in filename:
+
+            header_row = 4
+
+        print("READING FILE:", filename)
+
+        print("USING HEADER ROW:", header_row)
+
+        # ==========================================
+        # CSV
+        # ==========================================
+
+        if suffix == ".csv":
+
+            return pd.read_csv(
+                path,
+                header=header_row
+            )
+
+        # ==========================================
+        # XLS
+        # ==========================================
+
+        if suffix == ".xls":
+
+            # HTML disguised XLS
+
+            if self._is_html_file(path):
+
+                return self._read_html_xls(
+                    path,
+                    header_row=header_row
+                )
+
+            # Real XLS
+
+            return pd.read_excel(
+                path,
+                header=header_row,
+                engine="xlrd",
+            )
+
+        # ==========================================
+        # XLSX
+        # ==========================================
+
+        return pd.read_excel(
+            path,
+            header=header_row
+        )
+
+    # =====================================================
+    # READ HEADER TEXT
+    # =====================================================
+
+    def _header_text(
+        self,
+        path: str
+    ) -> str:
+
+        suffix = Path(path).suffix.lower()
+
+        try:
+
+            if suffix == ".csv":
+
+                raw = pd.read_csv(
+                    path,
+                    header=None,
+                    nrows=30
+                )
+
+            elif suffix == ".xls":
+
+                if self._is_html_file(path):
+
+                    import io
+
+                    with open(
+                        path,
+                        "r",
+                        encoding="utf-8",
+                        errors="ignore"
+                    ) as file:
+
+                        content = file.read()
+
+                    tables = pd.read_html(
+                        io.StringIO(content)
+                    )
+
+                    raw = tables[0]
+
+                else:
+
+                    raw = pd.read_excel(
+                        path,
+                        header=None,
+                        nrows=30,
+                        engine="xlrd"
+                    )
+
+            else:
+
+                raw = pd.read_excel(
+                    path,
+                    header=None,
+                    nrows=30
+                )
+
+            # ==========================================
+            # SEARCH ALL CELLS
+            # ==========================================
+
+            for row_index in range(len(raw)):
+
+                row_values = [
+
+                    str(value).strip()
+
+                    for value in raw.iloc[row_index].fillna("")
+                ]
+
+                for col_index, value in enumerate(row_values):
+
+                    lower_value = value.lower()
+
+                    # ==================================
+                    # CASE 1:
+                    # Entire duration inside same cell
+                    # ==================================
+
+                    if (
+                        "01-apr" in lower_value
+                        and
+                        "31-mar" in lower_value
+                    ):
+
+                        return value
+
+                    # ==================================
+                    # CASE 2:
+                    # Duration label + next cell
+                    # ==================================
+
+                    if "duration" in lower_value:
+
+                        if col_index + 1 < len(row_values):
+
+                            next_value = row_values[col_index + 1]
+
+                            if next_value.strip():
+
+                                return next_value
+
+            # ==========================================
+            # FALLBACK FULL TEXT
+            # ==========================================
+
+            text = " ".join(
+
+                str(value)
+
+                for value in raw.fillna("").values.flatten()
+            )
+
+            return text
+
+        except Exception as exc:
+
+            print("HEADER READ ERROR:", exc)
+
+            return Path(path).name
+
+    # =====================================================
+    # NORMALIZE COLUMNS
+    # =====================================================
+
+    def _normalize_columns(
+        self,
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+
+        df = df.copy()
+
+        df.columns = [
+
+            str(col)
+            .strip()
+            .strip("'")
+            .strip('"')
+            .lower()
+
+            for col in df.columns
+        ]
+
+        print("NORMALIZED COLUMNS:")
+
+        print(df.columns.tolist())
+
+        return df
+
+    # =====================================================
+    # FIND COLUMN
+    # =====================================================
+
+    def _find_column(
+        self,
+        df: pd.DataFrame,
+        aliases: tuple[str, ...],
+        required: bool = True,
+    ) -> str | None:
+
+        for col in df.columns:
+
+            compact = (
+                str(col)
+                .strip()
+                .strip("'")
+                .strip('"')
+                .lower()
+            )
+
+            if (
+
+                compact in aliases
+
+                or any(
+                    alias in compact
+                    for alias in aliases
+                )
+            ):
+
+                return col
+
+        if required:
+
+            raise ValueError(
+
+                f"Could not find required column. "
+                f"Expected one of: "
+                f"{', '.join(aliases)}"
+            )
+
+        return None
+
+    # =====================================================
+    # CLEAN NUMERIC
+    # =====================================================
+
+    def _clean_numeric(
+        self,
+        series: pd.Series,
+    ) -> pd.Series:
+
+        return (
+
+            pd.to_numeric(
+
+                series
+                .fillna(0)
+                .astype(str)
+                .str.replace(
+                    ",",
+                    "",
+                    regex=False
+                ),
+
+                errors="coerce",
+            )
+
+            .fillna(0)
+
+            .astype(int)
+        )
+
+    # =====================================================
+    # NORMALIZE RESDEX
+    # =====================================================
+
+    def _normalize_resdex(
+        self,
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+
+        df = self._normalize_columns(df)
+
+        email_col = self._find_column(
+            df,
+            self.EMAIL_ALIASES,
+            required=False
+        )
+
+        subuser_col = self._find_column(
+            df,
+            self.NAME_ALIASES
+        )
+
+        if not email_col:
+
+            df["parsed_email"] = (
+
+                df[subuser_col]
+                .astype(str)
+                .str.extract(
+                    r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"
+                )[0]
+            )
+
+            email_col = "parsed_email"
+
+        df["parsed_name"] = (
+
+            df[subuser_col]
+            .astype(str)
+            .str.split("|")
+            .str[0]
+            .str.strip()
+        )
+
+        cv_col = self._find_column(
+            df,
+            self.CV_ALIASES
+        )
+
+        nvites_col = self._find_column(
+            df,
+            self.NVITES_ALIASES
+        )
+
+        team_col = self._find_column(
+            df,
+            self.TEAM_ALIASES,
+            required=False
+        )
+
+        return pd.DataFrame({
+
+            "email": (
+
+                df[email_col]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+            ),
+
+            "name":
+                df["parsed_name"],
+
+            "team_name": (
+
+                df[team_col]
+                .astype(str)
+                .str.strip()
+
+                if team_col
+
+                else ""
+            ),
+
+            "cv_usage":
+                self._clean_numeric(df[cv_col]),
+
+            "nvites_usage":
+                self._clean_numeric(df[nvites_col]),
+        })
+
+    # =====================================================
+    # NORMALIZE JOBS
+    # =====================================================
+
+    def _normalize_jobs(
+        self,
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+
+        df = self._normalize_columns(df)
+
+        email_col = self._find_column(
+            df,
+            self.EMAIL_ALIASES,
+            required=False
+        )
+
+        if not email_col:
+
+            email_col = self._find_column(
+                df,
+                ("subuser", "sub user")
+            )
+
+        jobs_col = self._find_column(
+            df,
+            self.JOB_ALIASES
+        )
+
+        team_col = self._find_column(
+            df,
+            self.TEAM_ALIASES,
+            required=False
+        )
+
+        return pd.DataFrame({
+
+            "email": (
+
+                df[email_col]
+                .astype(str)
+                .str.extract(
+                    r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"
+                )[0]
+                .str.strip()
+                .str.lower()
+            ),
+
+            "job_team_name": (
+
+                df[team_col]
+                .astype(str)
+                .str.strip()
+
+                if team_col
+
+                else ""
+            ),
+
+            "jobs_usage":
+                self._clean_numeric(df[jobs_col]),
+        })
+
+    # =====================================================
+    # PROCESS REPORTS
+    # =====================================================
+
+    def process_reports(
+        self,
+        resdex_path: str,
+        job_path: str,
+        financial_year: str,
+    ):
+
+        resdex_text = self._header_text(
+            resdex_path
+        )
+
+        job_text = self._header_text(
+            job_path
+        )
+
+        print("RESDEX HEADER:")
+        print(resdex_text)
+
+        print("JOB HEADER:")
+        print(job_text)
+
+        # ==========================================
+        # DATE VALIDATION
+        # ==========================================
+
+        resdex_range = parse_date_range_from_text(
+            resdex_text
+        )
+
+        job_range = parse_date_range_from_text(
+            job_text
+        )
+
+        validate_report_ranges(
+            resdex_range,
+            job_range,
+            financial_year,
+        )
+
+        # ==========================================
+        # READ FILES
+        # ==========================================
+
+        resdex_df = self._normalize_resdex(
+            self._read_file(resdex_path)
+        )
+
+        job_df = self._normalize_jobs(
+            self._read_file(job_path)
+        )
+
+        # ==========================================
+        # MERGE
+        # ==========================================
+
+        merged = pd.merge(
+            resdex_df,
+            job_df,
+            on="email",
+            how="outer",
+        ).fillna(0)
+
+        merged["name"] = (
+            merged["name"]
+            .replace(0, "")
+        )
+
+        merged["team_name"] = merged["team_name"].where(
+            merged["team_name"] != 0,
+            merged["job_team_name"],
+        )
+
+        # ==========================================
+        # WARNINGS
+        # ==========================================
+
+        warnings = []
+
+        missing_resdex = (
+
+            merged
+            .loc[
+                merged["cv_usage"].eq(0)
+                &
+                merged["nvites_usage"].eq(0),
+
+                "email",
+            ]
+            .tolist()
+        )
+
+        missing_jobs = (
+
+            merged
+            .loc[
+                merged["jobs_usage"].eq(0),
+                "email",
+            ]
+            .tolist()
+        )
+
+        if missing_resdex:
+
+            warnings.append({
+
+                "type":
+                    "missing_resdex",
+
+                "emails":
+                    missing_resdex,
+            })
+
+        if missing_jobs:
+
+            warnings.append({
+
+                "type":
+                    "missing_jobs",
+
+                "emails":
+                    missing_jobs,
+            })
+
+        # ==========================================
+        # RETURN
+        # ==========================================
+
+        return {
+
+            "range_start":
+                resdex_range[0],
+
+            "range_end":
+                resdex_range[1],
+
+            "rows": (
+
+                merged[[
+                    "email",
+                    "name",
+                    "team_name",
+                    "cv_usage",
+                    "nvites_usage",
+                    "jobs_usage",
+                ]]
+
+                .to_dict("records")
+            ),
+
+            "warnings":
+                warnings,
+        }
