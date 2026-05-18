@@ -1,659 +1,474 @@
-import { useState } from 'react';
+import { useEffect, useState } from "react";
 import {
-  Send,
-  MessageSquare,
-  Mail,
-  X,
-} from 'lucide-react';
+  Send, MessageSquare, Mail, X,
+  RefreshCw, AlertCircle, CheckCircle,
+} from "lucide-react";
 
-interface Alert {
-  id: string;
-  teamName: string;
-  type: 'warning' | 'critical' | 'exceeded';
-  cvUsage: number;
-  cvLimit: number;
-  nvitesUsage: number;
-  nvitesLimit: number;
-  jobsUsage: number;
-  jobsLimit: number;
-  overage: number;
-  members: {
-    name: string;
-    email: string;
-    cvUsage: number;
-    nvitesUsage: number;
-    jobsUsage: number;
-  }[];
+const API = "http://127.0.0.1:8000";
+
+interface Member {
+  name: string;
+  email: string;
+  cv_usage: number;
+  nvites_usage: number;
+  jobs_usage: number;
 }
 
-const mockAlerts: Alert[] = [
-  {
-    id: '1',
-    teamName: 'Talent Corner',
-    type: 'exceeded',
-    cvUsage: 3150,
-    cvLimit: 4000,
-    nvitesUsage: 18000,
-    nvitesLimit: 27500,
-    jobsUsage: 85,
-    jobsLimit: 120,
-    overage: 150,
-    members: [
-      {
-        name: 'Gauri Naik',
-        email: 'gauri.naik@talentcorner.in',
-        cvUsage: 1200,
-        nvitesUsage: 8500,
-        jobsUsage: 35,
-      },
-      {
-        name: 'Priya Sharma',
-        email: 'priya.sharma@talentcorner.in',
-        cvUsage: 950,
-        nvitesUsage: 5200,
-        jobsUsage: 28,
-      },
-      {
-        name: 'Rahul Desai',
-        email: 'rahul.desai@talentcorner.in',
-        cvUsage: 1000,
-        nvitesUsage: 4300,
-        jobsUsage: 22,
-      },
-    ],
-  },
-  {
-    id: '2',
-    teamName: 'Global Recruit',
-    type: 'critical',
-    cvUsage: 2500,
-    cvLimit: 3500,
-    nvitesUsage: 22050,
-    nvitesLimit: 22500,
-    jobsUsage: 80,
-    jobsLimit: 100,
-    overage: 0,
-    members: [
-      {
-        name: 'Deepak Reddy',
-        email: 'deepak.reddy@globalrecruit.in',
-        cvUsage: 1300,
-        nvitesUsage: 11000,
-        jobsUsage: 40,
-      },
-      {
-        name: 'Kavita Joshi',
-        email: 'kavita.joshi@globalrecruit.in',
-        cvUsage: 1200,
-        nvitesUsage: 11050,
-        jobsUsage: 40,
-      },
-    ],
-  },
-  {
-    id: '3',
-    teamName: 'HR Solutions',
-    type: 'warning',
-    cvUsage: 2200,
-    cvLimit: 3000,
-    nvitesUsage: 15000,
-    nvitesLimit: 22500,
-    jobsUsage: 92,
-    jobsLimit: 100,
-    overage: 0,
-    members: [
-      {
-        name: 'Amit Kumar',
-        email: 'amit.kumar@hrsolutions.in',
-        cvUsage: 1100,
-        nvitesUsage: 7500,
-        jobsUsage: 45,
-      },
-      {
-        name: 'Sneha Patel',
-        email: 'sneha.patel@hrsolutions.in',
-        cvUsage: 1100,
-        nvitesUsage: 7500,
-        jobsUsage: 47,
-      },
-    ],
-  },
-];
+interface AlertTeam {
+  team_id: number;
+  team_name: string;
+  partner_name: string;
+  partner_email: string;
+  type: "warning" | "critical" | "exceeded";
+  status: string;
+  cv_usage: number;
+  cv_limit: number;
+  nvites_usage: number;
+  nvites_limit: number;
+  jobs_usage: number;
+  jobs_limit: number;
+  cv_remaining: number;
+  nvites_remaining: number;
+  jobs_remaining: number;
+  overage_amount: number;
+  members: Member[];
+  message: string;
+}
+
+interface FinancialYear {
+  id: number;
+  label: string;
+  is_active: boolean;
+}
+
+// =====================================================
+// WHATSAPP MESSAGE GENERATOR
+// =====================================================
+
+function buildWhatsAppMessage(a: AlertTeam): string {
+  const pct = (u: number, l: number) =>
+    l > 0 ? Math.round((u / l) * 100) : 0;
+
+  const statusLine =
+    a.type === "exceeded"
+      ? "🔴 *LIMIT EXCEEDED*"
+      : a.type === "critical"
+      ? "🟠 *CRITICAL — Approaching Limit*"
+      : "🟡 *WARNING — High Usage*";
+
+  const memberLines = (a.members || [])
+    .map(
+      (m) =>
+        `  • ${m.name || m.email}\n` +
+        `    CV: ${(m.cv_usage ?? 0).toLocaleString()} | NVites: ${m.nvites_usage.toLocaleString()} | Jobs: ${m.jobs_usage}`
+    )
+    .join("\n");
+
+  const overageLine =
+    a.overage_amount > 0
+      ? `\n⚠️ *Overage Amount Due: ₹${a.overage_amount.toLocaleString()}*\nPlease clear this at the earliest.\n`
+      : "";
+
+  return (
+    `Hello ${a.partner_name || a.team_name},\n\n` +
+    `${statusLine}\n\n` +
+    `Here is your current Naukri usage status:\n\n` +
+    `📊 *Usage Summary*\n` +
+    `• CV Access: ${a.cv_usage.toLocaleString()} / ${a.cv_limit.toLocaleString()} (${pct(a.cv_usage, a.cv_limit)}%) — Remaining: ${a.cv_remaining.toLocaleString()}\n` +
+    `• NVites: ${a.nvites_usage.toLocaleString()} / ${a.nvites_limit.toLocaleString()} (${pct(a.nvites_usage, a.nvites_limit)}%) — Remaining: ${a.nvites_remaining.toLocaleString()}\n` +
+    `• Job Postings: ${a.jobs_usage} / ${a.jobs_limit} (${pct(a.jobs_usage, a.jobs_limit)}%) — Remaining: ${a.jobs_remaining}\n\n` +
+    `👥 *Member-wise Breakdown*\n${memberLines}\n` +
+    `${overageLine}\n` +
+    `Please review your usage and plan accordingly. Reach out if you'd like to discuss a top-up.\n\n` +
+    `Regards,\nTalent Corner Operations`
+  );
+}
+
+function buildEmailBody(a: AlertTeam): string {
+  const pct = (u: number, l: number) =>
+    l > 0 ? Math.round((u / l) * 100) : 0;
+
+  const memberRows = (a.members || [])
+    .map(
+      (m) =>
+        `${m.name || m.email} | CV: ${(m.cv_usage ?? 0).toLocaleString()} | NVites: ${m.nvites_usage.toLocaleString()} | Jobs: ${m.jobs_usage}`
+    )
+    .join("\n");
+
+  const overageLine =
+    a.overage_amount > 0
+      ? `\nOVERAGE AMOUNT DUE: ₹${a.overage_amount.toLocaleString()}\n`
+      : "";
+
+  return (
+    `Dear ${a.partner_name || a.team_name},\n\n` +
+    `This is an automated usage alert from Talent Corner for your Naukri account.\n\n` +
+    `USAGE SUMMARY\n` +
+    `-------------\n` +
+    `CV Access:    ${a.cv_usage.toLocaleString()} / ${a.cv_limit.toLocaleString()} (${pct(a.cv_usage, a.cv_limit)}%)  — Remaining: ${a.cv_remaining.toLocaleString()}\n` +
+    `NVites:       ${a.nvites_usage.toLocaleString()} / ${a.nvites_limit.toLocaleString()} (${pct(a.nvites_usage, a.nvites_limit)}%)  — Remaining: ${a.nvites_remaining.toLocaleString()}\n` +
+    `Job Postings: ${a.jobs_usage} / ${a.jobs_limit} (${pct(a.jobs_usage, a.jobs_limit)}%)  — Remaining: ${a.jobs_remaining}\n\n` +
+    `MEMBER-WISE BREAKDOWN\n` +
+    `---------------------\n` +
+    `${memberRows}\n` +
+    `${overageLine}\n` +
+    `Please review your usage and plan accordingly. If you would like to purchase a top-up, ` +
+    `please reply to this email or contact your account manager.\n\n` +
+    `Best regards,\n` +
+    `Operations Team\n` +
+    `Talent Corner`
+  );
+}
+
+// =====================================================
+// BADGE HELPERS
+// =====================================================
+
+function AlertBadge({ type }: { type: string }) {
+  if (type === "exceeded")
+    return <span className="px-2 py-1 bg-red-700 text-white text-xs rounded-full">Exceeded</span>;
+  if (type === "critical")
+    return <span className="px-2 py-1 bg-red-500 text-white text-xs rounded-full">Critical</span>;
+  return <span className="px-2 py-1 bg-orange-500 text-white text-xs rounded-full">Warning</span>;
+}
+
+function alertBg(type: string) {
+  if (type === "exceeded") return "border-red-200 bg-red-50";
+  if (type === "critical") return "border-red-200 bg-red-50";
+  return "border-orange-200 bg-orange-50";
+}
+
+function pct(u: number, l: number) {
+  return l > 0 ? Math.round((u / l) * 100) : 0;
+}
+
+// =====================================================
+// MAIN
+// =====================================================
 
 export default function Alerts() {
-  const [previewAlert, setPreviewAlert] =
-    useState<Alert | null>(null);
+  const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
+  const [financialYear, setFinancialYear] = useState("2025-2026");
+  const [alerts, setAlerts] = useState<AlertTeam[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const getAlertColor = (
-    type: string
-  ) => {
-    if (type === 'exceeded') {
-      return 'border-red-200 bg-red-50';
-    }
+  const [previewAlert, setPreviewAlert] = useState<AlertTeam | null>(null);
+  const [previewTab, setPreviewTab] = useState<"whatsapp" | "email">("whatsapp");
+  const [sendingId, setSendingId] = useState<number | null>(null);
+  const [sentIds, setSentIds] = useState<Set<number>>(new Set());
 
-    if (type === 'critical') {
-      return 'border-red-200 bg-red-50';
-    }
+  // ---------------------------------------------------
+  // Fetch financial years
+  // ---------------------------------------------------
+  useEffect(() => {
+    fetch(`${API}/dashboard/financial-years`)
+      .then((r) => r.json())
+      .then((data: FinancialYear[]) => {
+        if (Array.isArray(data) && data.length) {
+          setFinancialYears(data);
+          const active = data.find((y) => y.is_active) ?? data[0];
+          if (active) setFinancialYear(active.label);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
-    return 'border-orange-200 bg-orange-50';
+  // ---------------------------------------------------
+  // Fetch alerts
+  // ---------------------------------------------------
+  const fetchAlerts = () => {
+    if (!financialYear) return;
+    setLoading(true);
+    setError("");
+    fetch(`${API}/alerts/?financial_year=${encodeURIComponent(financialYear)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) setAlerts(data);
+        else setAlerts([]);
+      })
+      .catch(() => setError("Failed to load alerts. Is the server running?"))
+      .finally(() => setLoading(false));
   };
 
-  const getAlertBadge = (
-    type: string
-  ) => {
-    if (type === 'exceeded') {
-      return (
-        <span className="px-2 py-1 bg-red-600 text-white text-xs rounded-full">
-          Exceeded
-        </span>
-      );
-    }
+  useEffect(() => { fetchAlerts(); }, [financialYear]);
 
-    if (type === 'critical') {
-      return (
-        <span className="px-2 py-1 bg-red-500 text-white text-xs rounded-full">
-          Critical
-        </span>
+  // ---------------------------------------------------
+  // Send alert email via backend
+  // ---------------------------------------------------
+  const handleSendAlert = async (a: AlertTeam) => {
+    setSendingId(a.team_id);
+    try {
+      const res = await fetch(
+        `${API}/alerts/${a.team_id}/send?financial_year=${encodeURIComponent(financialYear)}`,
+        { method: "POST" }
       );
+      const data = await res.json();
+      if (data.status === "success") {
+        setSentIds((prev) => new Set([...prev, a.team_id]));
+      } else {
+        setError(`Failed to send alert for ${a.team_name}: ${data.message || "Unknown error"}`);
+      }
+    } catch {
+      setError(`Server error while sending alert for ${a.team_name}.`);
+    } finally {
+      setSendingId(null);
     }
-
-    return (
-      <span className="px-2 py-1 bg-orange-500 text-white text-xs rounded-full">
-        Warning
-      </span>
-    );
   };
+
+  // ---------------------------------------------------
+  // Open WhatsApp with pre-filled message
+  // ---------------------------------------------------
+  const openWhatsApp = (a: AlertTeam) => {
+    const msg = encodeURIComponent(buildWhatsAppMessage(a));
+    // Opens WhatsApp with message pre-filled; no phone hardcoded
+    window.open(`https://wa.me/?text=${msg}`, "_blank");
+  };
+
+  // ---------------------------------------------------
+  // Open email client with pre-filled draft
+  // ---------------------------------------------------
+  const openEmail = (a: AlertTeam) => {
+    const subject = encodeURIComponent(`Naukri Usage Alert — ${a.team_name}`);
+    const body = encodeURIComponent(buildEmailBody(a));
+    const to = encodeURIComponent(a.partner_email || "");
+    window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
+  };
+
+  // ---------------------------------------------------
+  // Stats
+  // ---------------------------------------------------
+  const exceededCount = alerts.filter((a) => a.type === "exceeded").length;
+  const criticalCount = alerts.filter((a) => a.type === "critical").length;
+  const warningCount = alerts.filter((a) => a.type === "warning").length;
 
   return (
     <div className="p-8">
 
+      {/* HEADER */}
       <div className="flex justify-between items-center mb-8">
-
         <div>
-
-          <h1 className="text-3xl mb-2">
-            Alerts
-          </h1>
-
-          <p className="text-slate-600">
-            Manage and send usage notifications
-          </p>
-
+          <h1 className="text-3xl mb-2">Alerts</h1>
+          <p className="text-slate-600">Manage and send usage notifications to franchise partners</p>
         </div>
-
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-
-          <p className="text-slate-600 mb-2">
-            Teams Exceeding Limits
-          </p>
-
-          <p className="text-3xl font-medium text-red-600">
-            1
-          </p>
-
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-
-          <p className="text-slate-600 mb-2">
-            Critical Alerts (90%+)
-          </p>
-
-          <p className="text-3xl font-medium text-orange-600">
-            2
-          </p>
-
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-
-          <p className="text-slate-600 mb-2">
-            Alerts Sent This Week
-          </p>
-
-          <p className="text-3xl font-medium text-purple-600">
-            5
-          </p>
-
-        </div>
-
-      </div>
-
-      <div className="space-y-4">
-
-        {mockAlerts.map((alertItem) => (
-
-          <div
-            key={alertItem.id}
-            className={`rounded-xl p-6 border ${getAlertColor(alertItem.type)}`}
+        <div className="flex items-center gap-3">
+          <select
+            value={financialYear}
+            onChange={(e) => setFinancialYear(e.target.value)}
+            className="px-4 py-2 border border-slate-300 rounded-xl bg-white text-sm"
           >
-
-            <div className="flex justify-between items-start mb-4">
-
-              <div>
-
-                <div className="flex items-center gap-3 mb-2">
-
-                  <h3 className="text-xl font-medium">
-                    {alertItem.teamName}
-                  </h3>
-
-                  {getAlertBadge(alertItem.type)}
-
-                </div>
-
-                <p className="text-sm text-slate-600">
-
-                  {alertItem.type === 'exceeded' &&
-                    `Exceeded CV limit by ${alertItem.overage} downloads`}
-
-                  {alertItem.type === 'critical' &&
-                    'Approaching usage limits'}
-
-                  {alertItem.type === 'warning' &&
-                    'High usage detected'}
-
-                </p>
-
-              </div>
-
-              <div className="flex gap-2">
-
-                <button
-                  onClick={() =>
-                    setPreviewAlert(alertItem)
-                  }
-                  className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition text-sm"
-                >
-                  Preview
-                </button>
-
-                <button
-
-                  onClick={async () => {
-
-                    try {
-
-                      const response =
-                        await fetch(
-
-                          `http://127.0.0.1:8000/alerts/${alertItem.id}/send?financial_year=2026-2027`,
-
-                          {
-                            method: 'POST',
-                          }
-                        );
-
-                      const data =
-                        await response.json();
-
-                      if (
-                        data.status === 'success'
-                      ) {
-
-                        window.alert(
-                          'Alert email sent successfully'
-                        );
-
-                      } else {
-
-                        window.alert(
-                          'Failed to send alert'
-                        );
-                      }
-
-                    } catch (err) {
-
-                      console.error(err);
-
-                      window.alert(
-                        'Server error while sending alert'
-                      );
-                    }
-                  }}
-
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2 text-sm"
-                >
-
-                  <Send className="w-4 h-4" />
-
-                  Send Alert
-
-                </button>
-
-              </div>
-
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-
-              <div className="bg-white rounded-lg p-3 border border-slate-200">
-
-                <p className="text-xs text-slate-600 mb-1">
-                  CV Usage
-                </p>
-
-                <p className="font-medium">
-                  {alertItem.cvUsage.toLocaleString()} /{' '}
-                  {alertItem.cvLimit.toLocaleString()}
-                </p>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  {Math.round(
-                    (alertItem.cvUsage /
-                      alertItem.cvLimit) *
-                      100
-                  )}
-                  %
-                </p>
-
-              </div>
-
-              <div className="bg-white rounded-lg p-3 border border-slate-200">
-
-                <p className="text-xs text-slate-600 mb-1">
-                  NVites Usage
-                </p>
-
-                <p className="font-medium">
-                  {alertItem.nvitesUsage.toLocaleString()} /{' '}
-                  {alertItem.nvitesLimit.toLocaleString()}
-                </p>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  {Math.round(
-                    (alertItem.nvitesUsage /
-                      alertItem.nvitesLimit) *
-                      100
-                  )}
-                  %
-                </p>
-
-              </div>
-
-              <div className="bg-white rounded-lg p-3 border border-slate-200">
-
-                <p className="text-xs text-slate-600 mb-1">
-                  Jobs Usage
-                </p>
-
-                <p className="font-medium">
-                  {alertItem.jobsUsage} /{' '}
-                  {alertItem.jobsLimit}
-                </p>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  {Math.round(
-                    (alertItem.jobsUsage /
-                      alertItem.jobsLimit) *
-                      100
-                  )}
-                  %
-                </p>
-
-              </div>
-
-            </div>
-
-          </div>
-        ))}
-
+            {financialYears.length > 0
+              ? financialYears.map((y) => (
+                  <option key={y.id} value={y.label}>FY {y.label}</option>
+                ))
+              : <option value={financialYear}>FY {financialYear}</option>}
+          </select>
+          <button
+            onClick={fetchAlerts}
+            className="px-4 py-2 border border-slate-300 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" /> Refresh
+          </button>
+        </div>
       </div>
 
-      {previewAlert && (
-
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto">
-
-            <div className="p-6 border-b border-slate-200 flex justify-between items-center sticky top-0 bg-white">
-
-              <h2 className="text-xl font-medium">
-                Alert Preview
-              </h2>
-
-              <button
-                onClick={() =>
-                  setPreviewAlert(null)
-                }
-                className="text-slate-400 hover:text-slate-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-            </div>
-
-            <div className="p-6">
-
-              <div className="flex gap-4 mb-6">
-
-                <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
-
-                  <MessageSquare className="w-4 h-4" />
-
-                  WhatsApp
-
-                </button>
-
-                <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-
-                  <Mail className="w-4 h-4" />
-
-                  Email
-
-                </button>
-
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-6 border border-slate-200">
-
-                <h3 className="font-medium text-lg mb-4">
-
-                  Usage Alert: {previewAlert.teamName}
-
-                </h3>
-
-                <p className="text-sm text-slate-700 mb-4">
-                  Dear Team,
-                </p>
-
-                <p className="text-sm text-slate-700 mb-4">
-                  This is to inform you about your current usage status for the Naukri platform:
-                </p>
-
-                <div className="bg-white rounded-lg p-4 mb-4 border border-slate-200">
-
-                  <h4 className="font-medium mb-3">
-                    Usage Summary
-                  </h4>
-
-                  <div className="space-y-2 text-sm">
-
-                    <div className="flex justify-between">
-
-                      <span className="text-slate-600">
-                        CV Downloads:
-                      </span>
-
-                      <span className="font-medium">
-
-                        {previewAlert.cvUsage.toLocaleString()} /{' '}
-                        {previewAlert.cvLimit.toLocaleString()}
-
-                        {' '}
-                        (
-
-                        {Math.round(
-                          (previewAlert.cvUsage /
-                            previewAlert.cvLimit) *
-                            100
-                        )}
-
-                        %)
-
-                      </span>
-
-                    </div>
-
-                    <div className="flex justify-between">
-
-                      <span className="text-slate-600">
-                        NVites:
-                      </span>
-
-                      <span className="font-medium">
-
-                        {previewAlert.nvitesUsage.toLocaleString()} /{' '}
-                        {previewAlert.nvitesLimit.toLocaleString()}
-
-                        {' '}
-                        (
-
-                        {Math.round(
-                          (previewAlert.nvitesUsage /
-                            previewAlert.nvitesLimit) *
-                            100
-                        )}
-
-                        %)
-
-                      </span>
-
-                    </div>
-
-                    <div className="flex justify-between">
-
-                      <span className="text-slate-600">
-                        Job Postings:
-                      </span>
-
-                      <span className="font-medium">
-
-                        {previewAlert.jobsUsage} /{' '}
-                        {previewAlert.jobsLimit}
-
-                        {' '}
-                        (
-
-                        {Math.round(
-                          (previewAlert.jobsUsage /
-                            previewAlert.jobsLimit) *
-                            100
-                        )}
-
-                        %)
-
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-                <div className="bg-white rounded-lg p-4 mb-4 border border-slate-200">
-
-                  <h4 className="font-medium mb-3">
-                    Member-wise Breakdown
-                  </h4>
-
-                  <div className="space-y-3">
-
-                    {previewAlert.members.map(
-                      (member, idx) => (
-
-                        <div
-                          key={idx}
-                          className="text-sm"
-                        >
-
-                          <p className="font-medium">
-
-                            {member.name}
-                            {' '}
-                            (
-                            {member.email}
-                            )
-
-                          </p>
-
-                          <p className="text-slate-600">
-
-                            CV:
-                            {' '}
-                            {member.cvUsage.toLocaleString()}
-
-                            {' '}|{' '}
-
-                            NVites:
-                            {' '}
-                            {member.nvitesUsage.toLocaleString()}
-
-                            {' '}|{' '}
-
-                            Jobs:
-                            {' '}
-                            {member.jobsUsage}
-
-                          </p>
-
-                        </div>
-                      )
-                    )}
-
-                  </div>
-
-                </div>
-
-                {previewAlert.overage > 0 && (
-
-                  <div className="bg-red-50 rounded-lg p-4 mb-4 border border-red-200">
-
-                    <p className="text-sm text-red-900 font-medium mb-2">
-                      Overage Charges
-                    </p>
-
-                    <p className="text-sm text-red-700">
-
-                      Amount due:
-                      {' '}
-                      ₹
-                      {(previewAlert.overage * 50).toLocaleString()}
-
-                    </p>
-
-                    <button className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition">
-
-                      Pay Invoice
-
-                    </button>
-
-                  </div>
-                )}
-
-                <p className="text-sm text-slate-700 mb-2">
-                  Please review your usage and plan accordingly.
-                </p>
-
-                <p className="text-sm text-slate-700">
-                  Best regards,
-                  <br />
-                  Operations Team
-                </p>
-
-              </div>
-
-            </div>
-
-          </div>
-
+      {/* STAT CARDS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <p className="text-slate-600 mb-2">Teams Exceeding Limits</p>
+          <p className="text-3xl font-medium text-red-600">{exceededCount}</p>
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <p className="text-slate-600 mb-2">Critical Alerts (90%+)</p>
+          <p className="text-3xl font-medium text-orange-600">{criticalCount + warningCount}</p>
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <p className="text-slate-600 mb-2">Alerts Sent This Session</p>
+          <p className="text-3xl font-medium text-purple-600">{sentIds.size}</p>
+        </div>
+      </div>
+
+      {/* ERROR */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+          <p className="text-red-700 text-sm">{error}</p>
+          <button onClick={() => setError("")} className="ml-auto text-red-500"><X className="w-4 h-4" /></button>
         </div>
       )}
 
+      {/* LOADING */}
+      {loading && (
+        <div className="flex justify-center py-12">
+          <RefreshCw className="w-6 h-6 animate-spin text-purple-600" />
+        </div>
+      )}
+
+      {/* EMPTY */}
+      {!loading && alerts.length === 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-10 text-center">
+          <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-3" />
+          <p className="text-green-800 font-medium text-lg">All teams within limits</p>
+          <p className="text-green-700 text-sm mt-1">
+            No warnings or critical alerts for FY {financialYear}
+          </p>
+        </div>
+      )}
+
+      {/* ALERT CARDS */}
+      {!loading && (
+        <div className="space-y-4">
+          {alerts.map((a) => (
+            <div
+              key={a.team_id}
+              className={`rounded-xl p-6 border ${alertBg(a.type)}`}
+            >
+              {/* TOP ROW */}
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <h3 className="text-xl font-medium">{a.team_name}</h3>
+                    <AlertBadge type={a.type} />
+                    {sentIds.has(a.team_id) && (
+                      <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                        <CheckCircle className="w-3 h-3" /> Alert Sent
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-600">
+                    {a.partner_name || "—"} · {a.partner_email || "no email on file"}
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setPreviewAlert(a); setPreviewTab("whatsapp"); }}
+                    className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
+                  >
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => openWhatsApp(a)}
+                    className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm"
+                  >
+                    <MessageSquare className="w-4 h-4" /> WhatsApp
+                  </button>
+                  <button
+                    onClick={() => openEmail(a)}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm"
+                  >
+                    <Mail className="w-4 h-4" /> Email
+                  </button>
+                  <button
+                    onClick={() => handleSendAlert(a)}
+                    disabled={sendingId === a.team_id || sentIds.has(a.team_id)}
+                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {sendingId === a.team_id
+                      ? <RefreshCw className="w-4 h-4 animate-spin" />
+                      : <Send className="w-4 h-4" />}
+                    {sendingId === a.team_id ? "Sending..." : "Send Email"}
+                  </button>
+                </div>
+              </div>
+
+              {/* USAGE GRID */}
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: "CV Access", used: a.cv_usage, limit: a.cv_limit, rem: a.cv_remaining },
+                  { label: "NVites", used: a.nvites_usage, limit: a.nvites_limit, rem: a.nvites_remaining },
+                  { label: "Job Postings", used: a.jobs_usage, limit: a.jobs_limit, rem: a.jobs_remaining },
+                ].map(({ label, used, limit, rem }) => (
+                  <div key={label} className="bg-white rounded-lg p-3 border border-slate-200">
+                    <p className="text-xs text-slate-600 mb-1">{label}</p>
+                    <p className="font-medium text-sm">
+                    {(used ?? 0).toLocaleString()} / {(limit ?? 0).toLocaleString()}
+                    </p>
+
+                    <p className="text-xs text-slate-500 mt-0.5">
+                    {pct(used ?? 0, limit ?? 0)}% used · {(rem ?? 0).toLocaleString()} remaining
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* OVERAGE */}
+              {a.overage_amount > 0 && (
+                <div className="mt-3 bg-red-100 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-900 font-medium">
+                  Overage due: ₹{a.overage_amount.toLocaleString()}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* PREVIEW MODAL */}
+      {previewAlert && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-2xl">
+
+            <div className="p-5 border-b border-slate-200 flex justify-between items-center sticky top-0 bg-white">
+              <div>
+                <h2 className="text-lg font-medium">Alert Preview — {previewAlert.team_name}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Review before sending</p>
+              </div>
+              <button onClick={() => setPreviewAlert(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5">
+              {/* TABS */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setPreviewTab("whatsapp")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    previewTab === "whatsapp"
+                      ? "bg-green-600 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  <MessageSquare className="w-4 h-4" /> WhatsApp
+                </button>
+                <button
+                  onClick={() => setPreviewTab("email")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    previewTab === "email"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  <Mail className="w-4 h-4" /> Email
+                </button>
+              </div>
+
+              {/* MESSAGE CONTENT */}
+              <pre className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">
+                {previewTab === "whatsapp"
+                  ? buildWhatsAppMessage(previewAlert)
+                  : buildEmailBody(previewAlert)}
+              </pre>
+
+              {/* SEND BUTTONS */}
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => openWhatsApp(previewAlert)}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                >
+                  <MessageSquare className="w-4 h-4" /> Open WhatsApp
+                </button>
+                <button
+                  onClick={() => openEmail(previewAlert)}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                >
+                  <Mail className="w-4 h-4" /> Open Email
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

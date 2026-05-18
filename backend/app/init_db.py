@@ -5,6 +5,7 @@ from app.database import Base, engine, SessionLocal
 # =====================================================
 
 from app.models.audit import AuditLog
+from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.financial_year import FinancialYear
 from app.models.invoice import Invoice
 from app.models.pricing import PricingPlan

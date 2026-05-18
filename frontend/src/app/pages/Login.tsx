@@ -6,7 +6,6 @@ import { useRole } from "../context/RoleContext";
 import type { Role } from "../context/RoleContext";
 
 export default function Login() {
-
   const navigate = useNavigate();
   const { login } = useRole();
 
@@ -24,9 +23,12 @@ export default function Login() {
       const data = await loginUser(username, password);
 
       if (data.access_token) {
-        // Write to context AND localStorage in one call
-        login(data.access_token, data.role as Role, data.username);
-        navigate("/dashboard");
+        const userRole = data.role as Role;
+        login(data.access_token, userRole, data.username);
+
+        // owner (Rashesh) → Financial Insights
+        // operations (Kajal) → Dashboard
+        navigate(userRole === "owner" ? "/financial" : "/dashboard", { replace: true });
       } else {
         setError("Invalid username or password.");
       }
@@ -41,34 +43,24 @@ export default function Login() {
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-purple-100 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8">
 
-        {/* LOGO + TITLE */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-purple-600 rounded-2xl mx-auto flex items-center justify-center mb-4">
             <Lock className="text-white w-8 h-8" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-800">
-            Naukri Monitor
-          </h1>
-          <p className="text-slate-500 mt-2">
-            Talent Corner — Internal Portal
-          </p>
+          <h1 className="text-3xl font-bold text-slate-800">Naukri Monitor</h1>
+          <p className="text-slate-500 mt-2">Talent Corner — Internal Portal</p>
         </div>
 
-        {/* ERROR */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-5 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
             <p className="text-red-800 text-sm">{error}</p>
           </div>
         )}
 
-        {/* FORM */}
         <form onSubmit={handleLogin} className="space-y-5">
-
           <div>
-            <label className="text-sm font-medium text-slate-600">
-              Username
-            </label>
+            <label className="text-sm font-medium text-slate-600">Username</label>
             <div className="relative mt-2">
               <User className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
               <input
@@ -84,9 +76,7 @@ export default function Login() {
           </div>
 
           <div>
-            <label className="text-sm font-medium text-slate-600">
-              Password
-            </label>
+            <label className="text-sm font-medium text-slate-600">Password</label>
             <div className="relative mt-2">
               <Lock className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
               <input
@@ -110,6 +100,9 @@ export default function Login() {
           </button>
         </form>
 
+        <p className="text-center text-xs text-slate-400 mt-6">
+          Operations team · Internal use only
+        </p>
       </div>
     </div>
   );

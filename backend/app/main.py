@@ -1,11 +1,11 @@
 from fastapi import FastAPI
-
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.routes.inventory_adjustments import router as inventory_adjustments_router
+from app.routes.invoice_routes import router as invoice_router
 
 # =====================================================
 # ROUTES
-# =====================================================
+# ===========================================from fastapi import FastAPI==========
 
 from app.routes import (
     auth,
@@ -86,7 +86,11 @@ app.include_router(master_data.router)
 
 app.include_router(templates.router)
 
+app.include_router(invoice_router)
 
+app.include_router(
+    inventory_adjustments_router
+)
 # =====================================================
 # ROOT
 # =====================================================

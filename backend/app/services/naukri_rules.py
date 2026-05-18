@@ -17,6 +17,7 @@ from app.models.report_upload import ReportUpload
 from app.models.team import Team
 from app.models.topup import TopUp
 from app.models.usage import SubUserUsage
+from app.services.inventory_engine import effective_limits
 
 INVENTORY_TYPES = ("cv", "nvites", "jobs")
 MASTER_NAUKRI_COST = 13000000
@@ -41,10 +42,11 @@ DEFAULT_PRICING = [
     ("March", "All Partners", 0, 250, 2500, 20),
 ]
 
+# FIX 2: Staffing Pro now stores BASE limits (3000, 22500, 100) not pre-multiplied (6000, 45000, 200)
 DEFAULT_TEAMS = [
     ("Talent Corner", "Gauri Naik", "gauri.naik@talentcorner.in", 1, "Early Renewal", "Q1 (Apr-Jun)", 80000, 56000, 3000, 22500, 100),
     ("HR Solutions", "Amit Kumar", "amit.kumar@hrsolutions.in", 1, "New Partner", "Q1 (Apr-Jun)", 80000, 58000, 3000, 22500, 100),
-    ("Staffing Pro", "Vikram Singh", "vikram.singh@staffingpro.in", 2, "New Partner", "Q1 (Apr-Jun)", 160000, 115000, 6000, 45000, 200),
+    ("Staffing Pro", "Vikram Singh", "vikram.singh@staffingpro.in", 2, "New Partner", "Q1 (Apr-Jun)", 160000, 115000, 3000, 22500, 100),
     ("Global Recruit", "Deepak Reddy", "deepak.reddy@globalrecruit.in", 1, "Returning Partner", "Q2 (Jul-Sep)", 70000, 55000, 3000, 22500, 100),
     ("Smart Hire", "Neha Gupta", "neha.gupta@smarthire.in", 1, "New Partner", "Q1 (Apr-Jun)", 80000, 54000, 3000, 22500, 100),
 ]
@@ -106,7 +108,16 @@ def seed_defaults(db: Session):
 
     if db.query(PricingPlan).count() == 0:
         for period, partner_type, price, cv, nvites, jobs in DEFAULT_PRICING:
-            db.add(PricingPlan(period=period, partner_type=partner_type, price=price, cv_limit=cv, nvites_limit=nvites, jobs_limit=jobs))
+            db.add(PricingPlan(
+                period=period,
+                partner_type=partner_type,
+                licence_fee=price,
+                cv_limit=cv,
+                nvites_limit=nvites,
+                jobs_limit=jobs,
+                is_free_plan=(price == 0),
+                created_by="system"
+            ))
 
     if db.query(Team).count() == 0:
         for row in DEFAULT_TEAMS:
@@ -135,6 +146,7 @@ def seed_defaults(db: Session):
             db.add(TopUp(team_id=talent.id, team_name=talent.name, cv_topup=1000, nvites_topup=5000, jobs_topup=20, amount=25000, purchase_date=date(2026, 4, 15), added_by="Kajal"))
         if global_recruit:
             db.add(TopUp(team_id=global_recruit.id, team_name=global_recruit.name, cv_topup=500, amount=12500, purchase_date=date(2026, 4, 10), added_by="Kajal"))
+
 
 def parse_date(value) -> date | None:
     if isinstance(value, date):
@@ -209,6 +221,7 @@ def normalize_team_name(name: str) -> str:
     )
 
 
+# FIX 1: Store BASE limits only — inventory engine multiplies by licences dynamically
 def create_team_from_upload(
     db,
     team_name: str,
@@ -239,9 +252,10 @@ def create_team_from_upload(
             join_period=join_period,
             licence_fee=licence_fee,
             cost_share=0,
-            cv_limit=cv_limit * licences,
-            nvites_limit=nvites_limit * licences,
-            jobs_limit=jobs_limit * licences,
+            # FIXED: store BASE values only; inventory engine multiplies by licences dynamically
+            cv_limit=cv_limit,
+            nvites_limit=nvites_limit,
+            jobs_limit=jobs_limit,
             is_active=True,
         )
         db.add(new_team)
@@ -271,7 +285,6 @@ def validate_report_ranges(
 
     start = financial_year_start(financial_year)
 
-    # FIX: validate each range separately with clear error messages
     if not resdex_range[0]:
         raise HTTPException(status_code=400, detail="Could not parse date range from Resdex report. Please re-download from Naukri.")
     if not job_range[0]:
@@ -297,7 +310,6 @@ def validate_report_ranges(
 
 
 def usage_totals(db: Session, team_id: int, financial_year: str) -> dict:
-    # FIX: clean formatting, consistent signature
     rows = (
         db.query(SubUserUsage)
         .filter(
@@ -322,12 +334,20 @@ def topup_totals(db: Session, team_id: int) -> dict:
     }
 
 
-def team_limits(team: Team, db: Session) -> dict:
-    topups = topup_totals(db, team.id)
+def team_limits(
+    team: Team,
+    db: Session,
+    financial_year: str
+) -> dict:
+    limits = effective_limits(
+        team,
+        db,
+        financial_year
+    )
     return {
-        "cv": (team.cv_limit or 0) + topups["cv"],
-        "nvites": (team.nvites_limit or 0) + topups["nvites"],
-        "jobs": (team.jobs_limit or 0) + topups["jobs"],
+        "cv": limits["cv_limit"],
+        "nvites": limits["nvites_limit"],
+        "jobs": limits["jobs_limit"],
     }
 
 
@@ -348,9 +368,8 @@ def status_for_percent(value: int) -> str:
 
 
 def status_for_team(team: Team, db: Session, financial_year: str) -> str:
-    # FIX: clean formatting, pass financial_year correctly
     usage = usage_totals(db, team.id, financial_year)
-    limits = team_limits(team, db)
+    limits = team_limits(team, db, financial_year)
     return status_for_percent(
         max(usage_percent(usage[key], limits[key]) for key in INVENTORY_TYPES)
     )
@@ -362,13 +381,11 @@ def outstanding_for_team(db: Session, team_id: int) -> float:
 
 
 def team_payload(team: Team, db: Session, financial_year: str, include_financial: bool = False) -> dict:
-    # FIX: financial_year was missing as a parameter; was using undefined variable
     usage = usage_totals(db, team.id, financial_year)
     topups = topup_totals(db, team.id)
-    limits = team_limits(team, db)
+    limits = team_limits(team, db, financial_year)
     percentages = {key: usage_percent(usage[key], limits[key]) for key in INVENTORY_TYPES}
 
-    # FIX: removed duplicate/broken chained .filter() call on the query result
     subusers = (
         db.query(SubUserUsage)
         .filter(
@@ -422,9 +439,8 @@ def team_payload(team: Team, db: Session, financial_year: str, include_financial
 
 
 def overage_items(team: Team, db: Session, financial_year: str) -> list[dict]:
-    # FIX: financial_year was missing as a parameter; was using undefined variable
     usage = usage_totals(db, team.id, financial_year)
-    limits = team_limits(team, db)
+    limits = team_limits(team, db, financial_year)
     items = []
     for key in INVENTORY_TYPES:
         overage = max(0, usage[key] - limits[key])
@@ -511,7 +527,11 @@ def invoice_summary(invoices: Iterable[Invoice]) -> dict:
     overdue = sum(
         max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
         for invoice in invoices
-        if invoice.status != "Paid" and invoice.due_date and invoice.due_date < date.today()
+        if (
+            invoice.status != "Paid"
+            and invoice.due_date
+            and invoice.due_date.date() < date.today()
+        )
     )
     return {
         "outstanding": outstanding,
@@ -523,7 +543,6 @@ def invoice_summary(invoices: Iterable[Invoice]) -> dict:
 
 
 def alert_message(team: Team, db: Session, financial_year: str) -> dict:
-    # FIX: financial_year was missing as a parameter; was using undefined variable
     payload = team_payload(team, db, financial_year)
     items = overage_items(team, db, financial_year)
     overage_amount = sum(item["total"] for item in items)

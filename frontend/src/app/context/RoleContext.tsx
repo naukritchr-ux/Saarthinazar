@@ -2,17 +2,18 @@ import {
   createContext,
   useContext,
   useState,
-  useEffect,
   ReactNode,
 } from "react";
 
-export type Role = "kajal" | "rashesh";
+// Matches actual role values stored in the DB
+export type Role = "owner" | "operations";
 
 interface AuthContextType {
   role: Role | null;
   username: string | null;
   token: string | null;
   isLoggedIn: boolean;
+  isOwner: boolean;
   login: (token: string, role: Role, username: string) => void;
   logout: () => void;
 }
@@ -21,8 +22,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: ReactNode }) {
 
-  // Read from localStorage on first load so a page refresh
-  // doesn't log the user out
   const [token, setToken] = useState<string | null>(
     () => localStorage.getItem("token")
   );
@@ -34,6 +33,9 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   );
 
   const isLoggedIn = !!token && !!role;
+
+  // Rashesh is "owner", Kajal is "operations"
+  const isOwner = role === "owner";
 
   const login = (t: string, r: Role, u: string) => {
     localStorage.setItem("token", t);
@@ -55,14 +57,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ role, username, token, isLoggedIn, login, logout }}
+      value={{ role, username, token, isLoggedIn, isOwner, login, logout }}
     >
       {children}
     </AuthContext.Provider>
   );
 }
 
-// Main hook — use this everywhere in the app
 export function useRole() {
   const context = useContext(AuthContext);
   if (!context) {

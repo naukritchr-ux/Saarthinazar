@@ -26,7 +26,26 @@ export default function TopUps() {
   const [nvitesTopUp, setNvitesTopUp] = useState('');
   const [jobsTopUp, setJobsTopUp] = useState('');
   const [amount, setAmount] = useState('');
+  const [manualAmount, setManualAmount] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const calculateTotals = () => {
+    const cv = Number(cvTopUp || 0);
+    const nvites = Number(nvitesTopUp || 0);
+    const jobs = Number(jobsTopUp || 0);
+
+    const cvTotal = cv * 10;
+    const nvitesTotal = nvites * 0.5;
+    const jobsTotal = jobs * 50;
+
+    const subtotal = cvTotal + nvitesTotal + jobsTotal;
+    const gst = subtotal * 0.18;
+    const total = subtotal + gst;
+
+    return { subtotal, gst, total };
+  };
+
+  const totals = calculateTotals();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,6 +55,7 @@ export default function TopUps() {
     setNvitesTopUp('');
     setJobsTopUp('');
     setAmount('');
+    setManualAmount(false);
     setDate(new Date().toISOString().split('T')[0]);
   };
 
@@ -108,13 +128,35 @@ export default function TopUps() {
               <label className="block text-sm font-medium text-slate-700 mb-2">Amount (₹)</label>
               <input
                 type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                value={
+                  manualAmount
+                    ? amount
+                    : Math.round(totals.total)
+                }
+                onChange={(e) => {
+                  setManualAmount(true);
+                  setAmount(e.target.value);
+                }}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                 placeholder="0"
                 min="0"
                 required
               />
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm">
+              <div className="flex justify-between mb-2">
+                <span>Subtotal</span>
+                <span>₹{totals.subtotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span>GST (18%)</span>
+                <span>₹{totals.gst.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between font-medium border-t border-slate-200 pt-2">
+                <span>Total</span>
+                <span>₹{totals.total.toLocaleString()}</span>
+              </div>
             </div>
 
             <div>
@@ -130,22 +172,22 @@ export default function TopUps() {
 
             {selectedTeam && (
               <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
-                <h3 className="font-medium text-purple-900 mb-3">Current Inventory</h3>
+                <h3 className="font-medium text-purple-900 mb-3">
+                  Updated Inventory
+                </h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-purple-700">Original CV Limit:</span>
-                    <span className="font-medium">3,000</span>
+                    <span>CV Total</span>
+                    <span>{(3000 + Number(cvTopUp || 0)).toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-purple-700">Previous Top-Ups:</span>
-                    <span className="font-medium">1,000</span>
+                    <span>NVites Total</span>
+                    <span>{(22500 + Number(nvitesTopUp || 0)).toLocaleString()}</span>
                   </div>
-                  {cvTopUp && (
-                    <div className="flex justify-between border-t border-purple-200 pt-2">
-                      <span className="text-purple-900 font-medium">New Total:</span>
-                      <span className="font-medium text-purple-900">{4000 + parseInt(cvTopUp)}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between">
+                    <span>Jobs Total</span>
+                    <span>{(100 + Number(jobsTopUp || 0)).toLocaleString()}</span>
+                  </div>
                 </div>
               </div>
             )}
