@@ -1,12 +1,9 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 from app.routes.inventory_adjustments import router as inventory_adjustments_router
-from app.routes.invoice_routes import router as invoice_router
-
-# =====================================================
-# ROUTES
-# ===========================================from fastapi import FastAPI==========
-
 from app.routes import (
     auth,
     dashboard,
@@ -20,31 +17,11 @@ from app.routes import (
     templates,
 )
 
-
-# =====================================================
-# FASTAPI APP
-# =====================================================
-
 app = FastAPI(
-
     title="Naukri Usage Monitor",
-
-    description="""
-    Recruitment Billing & Analytics System
-
-    Features:
-    - Usage monitoring
-    - Team management
-    - Invoice generation
-    - Financial analytics
-    - Report uploads
-    - Top-up management
-    - Alerts & overage tracking
-    """,
-
-    version="1.0.0"
+    description="Recruitment Billing & Analytics System",
+    version="1.0.0",
 )
-
 
 # =====================================================
 # CORS
@@ -61,61 +38,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# =====================================================
+# STATIC FILES — serves /static/invoices/*.pdf for download
+# =====================================================
+
+STATIC_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "static"
+)
+os.makedirs(os.path.join(STATIC_DIR, "invoices"), exist_ok=True)
+os.makedirs(os.path.join(STATIC_DIR, "assets"), exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # =====================================================
-# REGISTER ROUTES
+# ROUTES
 # =====================================================
 
 app.include_router(auth.router)
-
 app.include_router(dashboard.router)
-
 app.include_router(reports.router)
-
-app.include_router(invoices.router)
-
 app.include_router(alerts.router)
-
 app.include_router(topups.router)
-
 app.include_router(financial.router)
-
 app.include_router(financial_years.router)
-
 app.include_router(master_data.router)
-
 app.include_router(templates.router)
+app.include_router(invoices.router)
+app.include_router(inventory_adjustments_router)
 
-app.include_router(invoice_router)
-
-app.include_router(
-    inventory_adjustments_router
-)
 # =====================================================
-# ROOT
+# ROOT / HEALTH
 # =====================================================
 
 @app.get("/")
 def home():
-
-    return {
-
-        "message":
-            "Naukri Usage Monitor Backend Running",
-
-        "status":
-            "success"
-    }
-
-
-# =====================================================
-# HEALTH CHECK
-# =====================================================
+    return {"message": "Naukri Usage Monitor Backend Running", "status": "success"}
 
 @app.get("/health")
 def health_check():
-
-    return {
-
-        "status": "healthy"
-    }
+    return {"status": "healthy"}

@@ -1,10 +1,8 @@
 import re
 import shutil
-
 from pathlib import Path
 
 import pandas as pd
-
 from fastapi import (
     APIRouter,
     Depends,
@@ -13,20 +11,17 @@ from fastapi import (
     HTTPException,
     UploadFile,
 )
-
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-
+from app.models.pricing import PricingPlan
 from app.models.report_upload import ReportUpload
 from app.models.team import Team
 from app.models.usage import SubUserUsage
-
 from app.services.naukri_rules import (
     add_audit,
     create_team_from_upload,
 )
-
 from app.services.report_processor import ReportProcessor
 
 
@@ -37,15 +32,13 @@ UPLOAD_DIR = Path("uploaded_reports")
 
 # ---------------------------------------------------------------------------
 # Canonical team name normalizer
-# Used EVERYWHERE: building the map, looking up teams, creating new teams.
-# "Talent Corner." / "TALENT CORNER" / "talent corner " → "talent corner"
 # ---------------------------------------------------------------------------
 
 def canonical(name: str) -> str:
     """Return a fully-normalized key used only for deduplication lookups."""
     s = str(name or "").lower().strip()
-    s = re.sub(r"[^a-z0-9\s]", "", s)   # strip punctuation
-    s = re.sub(r"\s+", " ", s).strip()  # collapse whitespace
+    s = re.sub(r"[^a-z0-9\s]", "", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return s or "unassigned"
 
 
@@ -74,6 +67,7 @@ def reports(db: Session = Depends(get_db)):
         .order_by(ReportUpload.created_at.desc())
         .all()
     )
+
     return [
         {
             "id": item.id,
@@ -82,8 +76,16 @@ def reports(db: Session = Depends(get_db)):
             "resdex_file": item.resdex_file,
             "job_posting_file": item.job_posting_file,
             "uploaded_by": item.uploaded_by,
-            "range_start": item.range_start.isoformat() if item.range_start else None,
-            "range_end": item.range_end.isoformat() if item.range_end else None,
+            "range_start": (
+                item.range_start.isoformat()
+                if item.range_start
+                else None
+            ),
+            "range_end": (
+                item.range_end.isoformat()
+                if item.range_end
+                else None
+            ),
             "status": item.status,
             "message": item.message,
         }
@@ -138,7 +140,9 @@ def upload_reports(
             str(job_path),
             financial_year,
         )
+
     except Exception as exc:
+
         db.add(
             ReportUpload(
                 financial_year=financial_year,
@@ -149,8 +153,13 @@ def upload_reports(
                 message=str(exc),
             )
         )
+
         db.commit()
-        raise HTTPException(status_code=400, detail=str(exc))
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
 
     # =========================================================================
     # DUPLICATE CHECK
@@ -175,10 +184,11 @@ def upload_reports(
         }
 
     # =========================================================================
-    # OVERWRITE: DELETE OLD SUBUSER ROWS FOR THIS RANGE
+    # OVERWRITE: DELETE OLD SUBUSER ROWS
     # =========================================================================
 
     if existing_upload and overwrite_existing:
+
         db.query(SubUserUsage).filter(
             SubUserUsage.financial_year == financial_year,
             SubUserUsage.upload_range_start == result["range_start"],
@@ -186,10 +196,7 @@ def upload_reports(
         ).delete()
 
     # =========================================================================
-    # BUILD CANONICAL TEAM MAP
-    # Key  : canonical(team.name)  → always "talent corner"  (no punctuation,
-    #                                 lower, collapsed spaces)
-    # Value: Team ORM object
+    # BUILD TEAM MAP
     # =========================================================================
 
     all_teams = db.query(Team).all()
@@ -200,15 +207,13 @@ def upload_reports(
     }
 
     created_teams: list[dict] = []
+
     added_subusers = 0
     updated_subusers = 0
+
     # =========================================================================
     # RESET TEAM USAGE
-    # IMPORTANT:
-    # Prevents duplicate accumulation on overwrite/re-upload
     # =========================================================================
-
-    all_teams = db.query(Team).all()
 
     for team in all_teams:
 
@@ -217,56 +222,87 @@ def upload_reports(
         team.jobs_usage = 0
 
     db.flush()
+
     # =========================================================================
-    # PROCESS EACH SUBUSER ROW
+    # PROCESS EACH ROW
     # =========================================================================
 
     for row in result["rows"]:
 
         # ---------------------------------------------------------------------
-        # 1. EMAIL — skip rows with no email
+        # EMAIL
         # ---------------------------------------------------------------------
 
         email = str(row.get("email") or "").strip().lower()
+
         if not email or "@" not in email:
             continue
 
         # ---------------------------------------------------------------------
-        # 2. CANONICAL TEAM NAME — used for map lookup and deduplication
-        #    If team_name is blank/unassigned, derive from email domain.
-        #    display_team_name — stored in the DB (title-cased, clean)
+        # TEAM NAME
         # ---------------------------------------------------------------------
 
         raw_team_name = row.get("team_name")
 
-        if pd.isna(raw_team_name) if isinstance(raw_team_name, float) else not raw_team_name:
+        if (
+            pd.isna(raw_team_name)
+            if isinstance(raw_team_name, float)
+            else not raw_team_name
+        ):
             raw_team_name = ""
 
         raw_team_name_str = str(raw_team_name).strip()
 
-        # Fall back to email domain when Resdex doesn't include a team column
-        if not raw_team_name_str or raw_team_name_str.lower() in ("unassigned", "nan", "none", "0", ""):
+        if (
+            not raw_team_name_str
+            or raw_team_name_str.lower()
+            in ("unassigned", "nan", "none", "0", "")
+        ):
             raw_team_name_str = team_name_from_email(email)
 
-        lookup_key = canonical(raw_team_name_str)          # e.g. "talent corner"
-        stored_name = display_name(raw_team_name_str)      # e.g. "Talent Corner"
+        lookup_key = canonical(raw_team_name_str)
+        stored_name = display_name(raw_team_name_str)
 
         # ---------------------------------------------------------------------
-        # 3. FIND TEAM (canonical map lookup — NO DB query inside loop)
+        # FIND TEAM
         # ---------------------------------------------------------------------
 
         team = team_map.get(lookup_key)
 
         # ---------------------------------------------------------------------
-        # 4. CREATE TEAM if it doesn't exist yet
+        # CREATE TEAM
         # ---------------------------------------------------------------------
 
         if not team:
+
             licences = int(row.get("licences") or 1)
 
-            BASE_CV     = 3000
-            BASE_NVITES = 22500
-            BASE_JOBS   = 100
+            partner_type = "New Partner"
+            join_period = "Q1"
+
+            pricing = (
+                db.query(PricingPlan)
+                .filter(
+                    PricingPlan.financial_year == financial_year,
+                    PricingPlan.period == join_period,
+                    PricingPlan.partner_type == partner_type,
+                    PricingPlan.is_locked == True,
+                    PricingPlan.is_active == True,
+                )
+                .first()
+            )
+
+            if not pricing:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"No locked pricing found for "
+                        f"{financial_year} / "
+                        f"{join_period} / "
+                        f"{partner_type}"
+                    ),
+                )
 
             team = create_team_from_upload(
                 db=db,
@@ -274,52 +310,54 @@ def upload_reports(
                 partner_name=str(row.get("name") or email),
                 partner_email=email,
                 licences=licences,
-                partner_type="New Partner",
-                join_period="Q1 (Apr-Jun)",
-                licence_fee=80000,
-                cv_limit=BASE_CV,
-                nvites_limit=BASE_NVITES,
-                jobs_limit=BASE_JOBS,
+                partner_type=partner_type,
+                join_period=join_period,
+                licence_fee=pricing.licence_fee,
+
+                # IMPORTANT FIX:
+                # DO NOT multiply again here
+                cv_limit=pricing.cv_limit,
+                nvites_limit=pricing.nvites_limit,
+                jobs_limit=pricing.jobs_limit,
             )
 
             db.flush()
 
             team_map[lookup_key] = team
 
-            created_teams.append({
-                "id":            team.id,
-                "name":          team.name,
-                "partner_email": team.partner_email,
-                "licences":      licences,
-                "cv_limit":      team.cv_limit,
-                "nvites_limit":  team.nvites_limit,
-                "jobs_limit":    team.jobs_limit,
-            })
+            created_teams.append(
+                {
+                    "id": team.id,
+                    "name": team.name,
+                    "partner_email": team.partner_email,
+                    "licences": licences,
+                    "cv_limit": team.cv_limit,
+                    "nvites_limit": team.nvites_limit,
+                    "jobs_limit": team.jobs_limit,
+                }
+            )
+
         # ---------------------------------------------------------------------
-        # 4.5 UPDATE TEAM TOTAL USAGE
-        # IMPORTANT:
-        # Team table stores TOTAL usage used by invoice generator
+        # UPDATE TEAM TOTAL USAGE
         # ---------------------------------------------------------------------
 
         team.cv_usage = (
             int(team.cv_usage or 0)
-            +
-            int(row.get("cv_usage") or 0)
+            + int(row.get("cv_usage") or 0)
         )
 
         team.nvites_usage = (
             int(team.nvites_usage or 0)
-            +
-            int(row.get("nvites_usage") or 0)
+            + int(row.get("nvites_usage") or 0)
         )
 
         team.jobs_usage = (
             int(team.jobs_usage or 0)
-            +
-            int(row.get("jobs_usage") or 0)
+            + int(row.get("jobs_usage") or 0)
         )
+
         # ---------------------------------------------------------------------
-        # 5. UPSERT SUBUSER USAGE
+        # UPSERT SUBUSER USAGE
         # ---------------------------------------------------------------------
 
         existing_usage = (
@@ -332,33 +370,50 @@ def upload_reports(
         )
 
         if existing_usage:
-            # UPDATE — count these so the response is accurate
+
             existing_usage.upload_range_start = result["range_start"]
-            existing_usage.upload_range_end   = result["range_end"]
-            existing_usage.team_id            = team.id
-            existing_usage.team_name          = team.name
-            existing_usage.name               = str(row.get("name") or email)
-            existing_usage.cv_usage           = int(row.get("cv_usage") or 0)
-            existing_usage.nvites_usage       = int(row.get("nvites_usage") or 0)
-            existing_usage.jobs_usage         = int(row.get("jobs_usage") or 0)
+            existing_usage.upload_range_end = result["range_end"]
+
+            existing_usage.team_id = team.id
+            existing_usage.team_name = team.name
+
+            existing_usage.name = str(row.get("name") or email)
+
+            existing_usage.cv_usage = int(
+                row.get("cv_usage") or 0
+            )
+
+            existing_usage.nvites_usage = int(
+                row.get("nvites_usage") or 0
+            )
+
+            existing_usage.jobs_usage = int(
+                row.get("jobs_usage") or 0
+            )
+
             updated_subusers += 1
 
         else:
-            # INSERT
+
             db.add(
                 SubUserUsage(
-                    financial_year      = financial_year,
-                    upload_range_start  = result["range_start"],
-                    upload_range_end    = result["range_end"],
-                    team_id             = team.id,
-                    team_name           = team.name,
-                    name                = str(row.get("name") or email),
-                    email               = email,
-                    cv_usage            = int(row.get("cv_usage") or 0),
-                    nvites_usage        = int(row.get("nvites_usage") or 0),
-                    jobs_usage          = int(row.get("jobs_usage") or 0),
+                    financial_year=financial_year,
+                    upload_range_start=result["range_start"],
+                    upload_range_end=result["range_end"],
+                    team_id=team.id,
+                    team_name=team.name,
+                    name=str(row.get("name") or email),
+                    email=email,
+                    cv_usage=int(row.get("cv_usage") or 0),
+                    nvites_usage=int(
+                        row.get("nvites_usage") or 0
+                    ),
+                    jobs_usage=int(
+                        row.get("jobs_usage") or 0
+                    ),
                 )
             )
+
             added_subusers += 1
 
     # =========================================================================
@@ -370,20 +425,21 @@ def upload_reports(
     message = (
         f"Upload successful. "
         f"{total_processed} subuser(s) processed "
-        f"({added_subusers} new, {updated_subusers} updated). "
+        f"({added_subusers} new, "
+        f"{updated_subusers} updated). "
         f"{len(created_teams)} new team(s) created."
     )
 
     db.add(
         ReportUpload(
-            financial_year   = financial_year,
-            resdex_file      = resdex_report.filename,
-            job_posting_file = job_posting_report.filename,
-            uploaded_by      = uploaded_by,
-            range_start      = result["range_start"],
-            range_end        = result["range_end"],
-            status           = "success",
-            message          = message,
+            financial_year=financial_year,
+            resdex_file=resdex_report.filename,
+            job_posting_file=job_posting_report.filename,
+            uploaded_by=uploaded_by,
+            range_start=result["range_start"],
+            range_end=result["range_end"],
+            status="success",
+            message=message,
         )
     )
 
@@ -398,8 +454,8 @@ def upload_reports(
         "report_upload",
         resdex_report.filename,
         {
-            "warnings":       result["warnings"],
-            "created_teams":  created_teams,
+            "warnings": result["warnings"],
+            "created_teams": created_teams,
             "financial_year": financial_year,
             "added_subusers": added_subusers,
             "updated_subusers": updated_subusers,
@@ -409,37 +465,49 @@ def upload_reports(
     db.commit()
 
     # =========================================================================
-    # BUILD HUMAN-READABLE WARNINGS
+    # FRIENDLY WARNINGS
     # =========================================================================
 
     friendly_warnings = []
+
     for w in result["warnings"]:
+
         emails = w.get("emails", [])
+
         if not emails:
             continue
+
         preview = emails[:3]
         rest = len(emails) - 3
+
         preview_str = ", ".join(preview)
+
         if rest > 0:
             preview_str += f" +{rest} more"
+
         if w["type"] == "missing_resdex":
+
             friendly_warnings.append(
-                f"Subusers in Job Posting report but not in Resdex (partial data): {preview_str}"
+                "Subusers in Job Posting report but not "
+                f"in Resdex (partial data): {preview_str}"
             )
+
         elif w["type"] == "missing_jobs":
+
             friendly_warnings.append(
-                f"Subusers in Resdex report but not in Job Posting (partial data): {preview_str}"
+                "Subusers in Resdex report but not "
+                f"in Job Posting (partial data): {preview_str}"
             )
 
     return {
-        "status":           "success",
-        "message":          message,
-        "financial_year":   financial_year,
-        "warnings":         result["warnings"],
+        "status": "success",
+        "message": message,
+        "financial_year": financial_year,
+        "warnings": result["warnings"],
         "friendly_warnings": friendly_warnings,
-        "created_teams":    created_teams,
-        "new_teams_added":  len(created_teams),
-        "subusers_added":   added_subusers,
+        "created_teams": created_teams,
+        "new_teams_added": len(created_teams),
+        "subusers_added": added_subusers,
         "subusers_updated": updated_subusers,
-        "subusers_total":   total_processed,
+        "subusers_total": total_processed,
     }

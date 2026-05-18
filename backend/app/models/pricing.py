@@ -15,7 +15,11 @@ from app.database import Base
 class PricingPlan(Base):
 
     __tablename__ = "pricing_plans"
-
+    financial_year = Column(
+        String(20),
+        nullable=False,
+        index=True
+    )
     id = Column(
         Integer,
         primary_key=True,
@@ -37,6 +41,19 @@ class PricingPlan(Base):
 
     period = Column(
         String(100),
+        nullable=False
+    )
+
+    # =====================================
+    # FINANCIAL YEAR
+    # =====================================
+
+    # Examples:
+    # 2025-2026
+    # 2026-2027
+
+    financial_year = Column(
+        String(20),
         nullable=False
     )
 
@@ -95,6 +112,45 @@ class PricingPlan(Base):
     is_active = Column(
         Boolean,
         default=True
+    )
+
+    # =====================================
+    # LOCK PRICING
+    # =====================================
+
+    # Prevent accidental editing
+    # after pricing approval
+
+    is_locked = Column(
+        Boolean,
+        default=False
+    )
+
+    # =====================================
+    # OVERRIDE CONTROL
+    # =====================================
+
+    # Allow or restrict
+    # manual team-level overrides
+
+    override_allowed = Column(
+        Boolean,
+        default=True
+    )
+
+    # =====================================
+    # SPECIAL OFFERS / NOTES
+    # =====================================
+
+    # Examples:
+    # Diwali Offer
+    # Year-End Pricing
+    # Custom Discount
+    # Enterprise Exception
+
+    notes = Column(
+        String,
+        nullable=True
     )
 
     # =====================================

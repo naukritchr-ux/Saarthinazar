@@ -1,4 +1,9 @@
 import { useEffect, useState } from "react";
+
+import {
+  useLocation,
+  useNavigate
+} from "react-router-dom";
 import {
   Send, MessageSquare, Mail, X,
   RefreshCw, AlertCircle, CheckCircle,
@@ -147,6 +152,9 @@ function pct(u: number, l: number) {
 // =====================================================
 
 export default function Alerts() {
+
+  const location = useLocation();
+  const navigate = useNavigate();
   const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
   const [financialYear, setFinancialYear] = useState("2025-2026");
   const [alerts, setAlerts] = useState<AlertTeam[]>([]);
@@ -162,17 +170,47 @@ export default function Alerts() {
   // Fetch financial years
   // ---------------------------------------------------
   useEffect(() => {
-    fetch(`${API}/dashboard/financial-years`)
-      .then((r) => r.json())
-      .then((data: FinancialYear[]) => {
-        if (Array.isArray(data) && data.length) {
-          setFinancialYears(data);
-          const active = data.find((y) => y.is_active) ?? data[0];
-          if (active) setFinancialYear(active.label);
+
+  fetch(`${API}/dashboard/financial-years`)
+    .then((r) => r.json())
+    .then((data: FinancialYear[]) => {
+
+      if (Array.isArray(data) && data.length) {
+
+        setFinancialYears(data);
+
+        // ==========================================
+        // PRIORITY 1:
+        // FY from Dashboard
+        // ==========================================
+
+        if (location.state?.financialYear) {
+
+          setFinancialYear(
+            location.state.financialYear
+          );
+
+          return;
         }
-      })
-      .catch(() => undefined);
-  }, []);
+
+        // ==========================================
+        // PRIORITY 2:
+        // active FY
+        // ==========================================
+
+        const active =
+          data.find((y) => y.is_active)
+          ?? data[0];
+
+        if (active) {
+
+          setFinancialYear(active.label);
+        }
+      }
+    })
+    .catch(() => undefined);
+
+}, [location.state]);
 
   // ---------------------------------------------------
   // Fetch alerts
@@ -369,6 +407,18 @@ export default function Alerts() {
                       : <Send className="w-4 h-4" />}
                     {sendingId === a.team_id ? "Sending..." : "Send Email"}
                   </button>
+                  <button
+                    onClick={() =>
+                    navigate("/dashboard", {
+                    state: {
+                    financialYear
+                  }
+                  })
+                }
+  className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
+>
+  Review
+</button>
                 </div>
               </div>
 

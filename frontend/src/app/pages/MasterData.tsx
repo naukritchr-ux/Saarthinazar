@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Edit2, Save, X, Settings, Plus, RefreshCw,
-  ChevronDown, ChevronUp, AlertCircle, Check
+  ChevronDown, ChevronUp, AlertCircle, Check, Lock, Unlock
 } from "lucide-react";
 
 const API = "http://127.0.0.1:8000";
@@ -16,14 +16,17 @@ const authHeaders = () => ({
 // =====================================================
 
 interface PricingPlan {
-  id: number;
+  id: number | string;
+  financial_year?: string;
   period: string;
   partner_type: string;
-  price: number;
+  licence_fee: number;
   cv_limit: number;
   nvites_limit: number;
   jobs_limit: number;
+  is_locked: boolean;
   updated_at: string | null;
+  isNew?: boolean;
 }
 
 interface TeamMaster {
@@ -79,13 +82,14 @@ function StatusBadge({ active }: { active: boolean }) {
 // =====================================================
 
 interface TeamEditModalProps {
+  financialYear: string;
   team: TeamMaster | null;
   pricing: PricingPlan[];
   onClose: () => void;
   onSave: (updated: TeamMaster) => void;
 }
 
-function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
+function TeamEditModal({ team, pricing, financialYear, onClose, onSave }: TeamEditModalProps) {
   const isNew = !team;
 
   const [form, setForm] = useState({
@@ -109,17 +113,15 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Unique periods and partner types from pricing matrix
   const periods = [...new Set(pricing.map((p) => p.period))];
   const partnerTypes = [...new Set(pricing.map((p) => p.partner_type))];
 
-  // Fetch auto-calc preview whenever period / type / licences change
   const fetchPreview = useCallback(async () => {
     if (form.manual_override) return;
     setLoadingPreview(true);
     try {
       const res = await fetch(
-        `${API}/master-data/teams/preview-limits?join_period=${encodeURIComponent(form.join_period)}&partner_type=${encodeURIComponent(form.partner_type)}&licences=${form.licences}`
+        `${API}/master-data/teams/preview-limits?financial_year=${financialYear}&join_period=${encodeURIComponent(form.join_period)}&partner_type=${encodeURIComponent(form.partner_type)}&licences=${form.licences}`
       );
       const data: PreviewLimits = await res.json();
       setPreview(data);
@@ -137,7 +139,7 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
     } finally {
       setLoadingPreview(false);
     }
-  }, [form.join_period, form.partner_type, form.licences, form.manual_override]);
+  }, [form.join_period, form.partner_type, form.licences, form.manual_override, financialYear]);
 
   useEffect(() => {
     fetchPreview();
@@ -152,7 +154,7 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
     setError("");
     try {
       const url = isNew
-        ? `${API}/master-data/teams`
+        ? `${API}/master-data/teams?financial_year=${financialYear}`
         : `${API}/master-data/teams/${team!.id}`;
       const method = isNew ? "POST" : "PUT";
       const res = await fetch(url, {
@@ -173,7 +175,6 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200">
           <h2 className="text-lg font-semibold">
             {isNew ? "Add New Team" : `Edit — ${team!.name}`}
@@ -184,7 +185,6 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
         </div>
 
         <div className="px-6 py-5 space-y-5">
-          {/* Basic Info */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Team Name *</label>
@@ -229,7 +229,7 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
               <select
                 value={form.join_period}
                 onChange={(e) => setForm({ ...form, join_period: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
               >
                 {periods.map((p) => (
                   <option key={p} value={p}>{p}</option>
@@ -241,7 +241,7 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
               <select
                 value={form.partner_type}
                 onChange={(e) => setForm({ ...form, partner_type: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
               >
                 {partnerTypes.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -250,7 +250,6 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
             </div>
           </div>
 
-          {/* Auto-calculated limits */}
           <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
             <div className="flex justify-between items-center mb-3">
               <p className="text-sm font-medium text-purple-900">
@@ -318,24 +317,24 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
                   type="number"
                   value={form.cost_share}
                   onChange={(e) => setForm({ ...form, cost_share: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm bg-white"
+                  className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm bg-white font-medium"
                 />
               </div>
             </div>
           </div>
 
-          {/* Status */}
-          <label className="flex items-center gap-3 cursor-pointer">
-            <div
-              className={`w-10 h-6 rounded-full transition-colors ${form.is_active ? "bg-green-500" : "bg-slate-300"} relative`}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
               onClick={() => setForm({ ...form, is_active: !form.is_active })}
+              className={`w-10 h-6 rounded-full transition-colors relative outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 ${form.is_active ? "bg-green-500" : "bg-slate-300"}`}
             >
               <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.is_active ? "translate-x-5" : "translate-x-1"}`} />
-            </div>
+            </button>
             <span className="text-sm font-medium text-slate-700">
               {form.is_active ? "Active" : "Inactive"}
             </span>
-          </label>
+          </div>
 
           {error && (
             <p className="text-sm text-red-600 flex items-center gap-1">
@@ -344,11 +343,10 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
+            className="px-4 py-2 text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 text-sm font-medium"
           >
             Cancel
           </button>
@@ -372,115 +370,306 @@ function TeamEditModal({ team, pricing, onClose, onSave }: TeamEditModalProps) {
 
 interface PricingRowProps {
   item: PricingPlan;
+  financialYear: string;
+  setPricing: React.Dispatch<React.SetStateAction<PricingPlan[]>>;
   onSave: (updated: PricingPlan) => void;
+  onRefreshPricing: () => void;
 }
 
-function PricingRow({ item, onSave }: PricingRowProps) {
-  const [editing, setEditing] = useState(false);
+function PricingRow({
+  item,
+  financialYear,
+  setPricing,
+  onSave,
+  onRefreshPricing,
+}: PricingRowProps) {
+  const [editing, setEditing] = useState(item.isNew || false);
   const [form, setForm] = useState({ ...item });
   const [saving, setSaving] = useState(false);
 
-  const handleSave = async () => {
-    setSaving(true);
+  useEffect(() => {
+    setForm({ ...item });
+  }, [item]);
+
+const handleSave = async () => {
+
+  setSaving(true);
+
+  try {
+
+    const method = item.isNew
+      ? "POST"
+      : "PUT";
+
+    const url = item.isNew
+      ? `${API}/master-data/pricing`
+      : `${API}/master-data/pricing/${item.id}`;
+
+    const res = await fetch(url, {
+
+      method,
+
+      headers: authHeaders(),
+
+      body: JSON.stringify({
+
+        financial_year: financialYear,
+
+        period: form.period,
+
+        partner_type: form.partner_type,
+
+        licence_fee: form.licence_fee,
+
+        cv_limit: form.cv_limit,
+
+        nvites_limit: form.nvites_limit,
+
+        jobs_limit: form.jobs_limit,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.detail || "Failed to save pricing");
+    }
+
+    onSave(data);
+
+    setEditing(false);
+
+    fetch(`${API}/master-data/pricing?financial_year=${financialYear}`, {
+      headers: authHeaders(),
+    })
+      .then((r) => r.json())
+      .then(setPricing);
+
+  } catch (err: any) {
+
+    alert(err.message);
+
+  } finally {
+
+    setSaving(false);
+  }
+};
+
+  const toggleLock = async () => {
     try {
-      const res = await fetch(`${API}/master-data/pricing/${item.id}`, {
-        method: "PUT",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          price: form.price,
-          cv_limit: form.cv_limit,
-          nvites_limit: form.nvites_limit,
-          jobs_limit: form.jobs_limit,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed");
-      onSave(data);
-      setEditing(false);
+      const res = await fetch(
+        `${API}/master-data/pricing/${item.id}/lock?locked=${!item.is_locked}`,
+        { 
+          method: "PATCH",
+          headers: authHeaders()
+        }
+      );
+      if (!res.ok) throw new Error("Failed to change lock state");
+      onRefreshPricing();
     } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setSaving(false);
+      alert(err.message || "Failed to toggle lock state.");
     }
   };
 
   return (
-    <tr className="border-b border-slate-100 hover:bg-slate-50 transition">
-      <td className="px-5 py-3 text-sm font-medium text-slate-700">{item.period}</td>
+    <tr className={`border-b border-slate-100 hover:bg-slate-50 transition ${item.is_locked ? "bg-slate-50/50" : ""}`}>
+      <td className="px-5 py-3 text-sm font-medium text-slate-700">
+
+  <select
+    value={form.period}
+    disabled={item.is_locked}
+    onChange={(e) => {
+
+      const value = e.target.value;
+
+      setForm((prev) => ({
+        ...prev,
+        period: value,
+      }));
+
+      setPricing((prev) =>
+        prev.map((p) =>
+          p.id === item.id
+            ? { ...p, period: value }
+            : p
+        )
+      );
+    }}
+    className="border rounded px-2 py-1 bg-white"
+  >
+    <option>Q1 (Apr-Jun)</option>
+    <option>Q2 (Jul-Sep)</option>
+    <option>Oct-Nov</option>
+    <option>December</option>
+    <option>January</option>
+    <option>February</option>
+    <option>March</option>
+  </select>
+
+</td>
       <td className="px-5 py-3 text-sm">
-        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">
-          {item.partner_type}
-        </span>
-      </td>
+
+  <select
+    value={form.partner_type}
+    disabled={item.is_locked}
+    onChange={(e) => {
+
+      const value = e.target.value;
+
+      setForm((prev) => ({
+        ...prev,
+        partner_type: value,
+      }));
+
+      setPricing((prev) =>
+        prev.map((p) =>
+          p.id === item.id
+            ? { ...p, partner_type: value }
+            : p
+        )
+      );
+    }}
+    className="border rounded px-2 py-1 bg-white"
+  >
+    <option>New Partner</option>
+    <option>Returning Partner</option>
+    <option>Early Renewal</option>
+    <option>Late Existing Partner</option>
+    <option>All</option>
+  </select>
+
+</td>
       <td className="px-5 py-3 text-sm">
         {editing ? (
           <input
             type="number"
-            value={form.price}
-            onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })}
-            className="px-2 py-1 border border-slate-300 rounded w-28 text-sm"
+            value={form.licence_fee}
+            disabled={item.is_locked}
+            onChange={(e) => setForm({ ...form, licence_fee: parseFloat(e.target.value) || 0 })}
+            className="px-2 py-1 border border-slate-300 rounded w-28 text-sm bg-white disabled:bg-slate-100 disabled:text-slate-400"
           />
         ) : (
-          <span className="font-medium">{fmtCurrency(item.price)}</span>
+          <span className={`font-medium ${item.is_locked ? "text-slate-500" : ""}`}>
+            {fmtCurrency(item.licence_fee)}
+          </span>
         )}
       </td>
       {[
-        { key: "cv_limit" as const, label: "CV" },
-        { key: "nvites_limit" as const, label: "NVites" },
-        { key: "jobs_limit" as const, label: "Jobs" },
+        { key: "cv_limit" as const },
+        { key: "nvites_limit" as const },
+        { key: "jobs_limit" as const },
       ].map(({ key }) => (
-        <td key={key} className="px-5 py-3 text-sm">
+        <td key={key} className={`px-5 py-3 text-sm ${item.is_locked ? "text-slate-500" : ""}`}>
           {editing ? (
             <input
               type="number"
               value={form[key]}
+              disabled={item.is_locked}
               onChange={(e) => setForm({ ...form, [key]: parseInt(e.target.value) || 0 })}
-              className="px-2 py-1 border border-slate-300 rounded w-24 text-sm"
+              className="px-2 py-1 border border-slate-300 rounded w-24 text-sm bg-white disabled:bg-slate-100 disabled:text-slate-400"
             />
           ) : (
             fmt(item[key])
           )}
         </td>
       ))}
+      <td className="px-5 py-3 text-sm font-medium text-slate-700">
+        {item.is_locked ? "🔒 Locked" : "🔓 Unlocked"}
+      </td>
       <td className="px-5 py-3 text-xs text-slate-400">
         {item.updated_at ? new Date(item.updated_at).toLocaleDateString("en-IN") : "—"}
       </td>
       <td className="px-5 py-3">
-        {editing ? (
-          <div className="flex gap-2">
+        <div className="flex items-center gap-3 justify-end">
+          {editing ? (
+            <div className="flex gap-2">
+              <button
+                onClick={handleSave}
+                disabled={saving || item.is_locked}
+                className="text-green-600 hover:text-green-700 disabled:opacity-50"
+              >
+                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => { setForm({ ...item }); setEditing(false); }}
+                className="text-red-500 hover:text-red-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={handleSave}
-              disabled={saving}
-              className="text-green-600 hover:text-green-700 disabled:opacity-50"
+              onClick={() => setEditing(true)}
+              disabled={item.is_locked}
+              className="text-purple-500 hover:text-purple-700 disabled:opacity-30"
             >
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              <Edit2 className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => { setForm({ ...item }); setEditing(false); }}
-              className="text-red-500 hover:text-red-600"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        ) : (
+          )}
+
           <button
-            onClick={() => setEditing(true)}
-            className="text-purple-500 hover:text-purple-700"
+            onClick={toggleLock}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded border font-medium transition ${
+              item.is_locked
+                ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+            }`}
           >
-            <Edit2 className="w-4 h-4" />
+            {item.is_locked ? (
+              <>
+                <Unlock className="w-3 h-3" /> Unlock
+              </>
+            ) : (
+              <>
+                <Lock className="w-3 h-3" /> Lock
+              </>
+            )}
           </button>
-        )}
+        </div>
       </td>
     </tr>
   );
 }
 
 // =====================================================
-// MAIN PAGE
+// MAIN MASTER DATA PAGE
 // =====================================================
 
 export default function MasterData() {
+  const [financialYear, setFinancialYear] = useState("2025-2026");
   const [pricing, setPricing] = useState<PricingPlan[]>([]);
+
+  const addEmptyPricingRow = () => {
+
+  setPricing((prev) => [
+
+    ...prev,
+
+    {
+      id: `temp-${Date.now()}`,
+
+      financial_year: financialYear,
+
+      period: "Q1 (Apr-Jun)",
+
+      partner_type: "New Partner",
+
+      licence_fee: 0,
+
+      cv_limit: 0,
+
+      nvites_limit: 0,
+
+      jobs_limit: 0,
+
+      is_locked: false,
+
+      updated_at: null,
+
+      isNew: true,
+    },
+  ]);
+};
   const [teams, setTeams] = useState<TeamMaster[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -491,18 +680,27 @@ export default function MasterData() {
   const [sortField, setSortField] = useState<"name" | "licences" | "join_period">("name");
   const [sortAsc, setSortAsc] = useState(true);
 
-  // ===================================================
-  // FETCH
-  // ===================================================
+  const fetchPricing = useCallback(async () => {
+    try {
+      const pRes = await fetch(`${API}/master-data/pricing?financial_year=${financialYear}`, {
+        headers: authHeaders()
+      });
+      if (!pRes.ok) throw new Error();
+      setPricing(await pRes.json());
+    } catch {
+      setError("Failed to reload specific financial year pricing.");
+    }
+  }, [financialYear]);
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [pRes, tRes] = await Promise.all([
-        fetch(`${API}/master-data/pricing`),
-        fetch(`${API}/master-data/teams`),
+        fetch(`${API}/master-data/pricing?financial_year=${financialYear}`, { headers: authHeaders() }),
+        fetch(`${API}/master-data/teams?financial_year=${financialYear}`, { headers: authHeaders() }),
       ]);
+      if (!pRes.ok || !tRes.ok) throw new Error();
       setPricing(await pRes.json());
       setTeams(await tRes.json());
     } catch {
@@ -510,13 +708,11 @@ export default function MasterData() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [financialYear]);
 
-  useEffect(() => { fetchAll(); }, []);
-
-  // ===================================================
-  // TEAMS TABLE
-  // ===================================================
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
 
   const filtered = teams
     .filter((t) => {
@@ -563,7 +759,7 @@ export default function MasterData() {
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-red-500" />
           <p className="text-red-700">{error}</p>
-          <button onClick={fetchAll} className="ml-auto px-4 py-2 bg-red-600 text-white rounded-lg text-sm">Retry</button>
+          <button onClick={fetchAll} className="ml-auto px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium">Retry</button>
         </div>
       </div>
     );
@@ -577,9 +773,21 @@ export default function MasterData() {
           <h1 className="text-3xl font-semibold mb-1">Master Data</h1>
           <p className="text-slate-500 text-sm">Pricing structure and team allocations — Rashesh access only</p>
         </div>
-        <button onClick={fetchAll} className="flex items-center gap-2 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
-          <RefreshCw className="w-4 h-4" /> Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium text-slate-600">Financial Year:</label>
+          <select
+            value={financialYear}
+            onChange={(e) => setFinancialYear(e.target.value)}
+            className="px-3 py-2 border border-slate-300 bg-white rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option value="2025-2026">2025-2026</option>
+            <option value="2026-2027">2026-2027</option>
+            <option value="2027-2028">2027-2028</option>
+          </select>
+          <button onClick={fetchAll} className="flex items-center gap-2 px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 bg-white shadow-sm">
+            <RefreshCw className="w-4 h-4" /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Owner notice */}
@@ -591,56 +799,85 @@ export default function MasterData() {
         </p>
       </div>
 
-      {/* ================================================= */}
-      {/* PRICING MATRIX */}
-      {/* ================================================= */}
-
+      {/* Pricing Matrix */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-semibold">Pricing & Inventory Matrix</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {pricing.length} plans · Click <Edit2 className="w-3 h-3 inline" /> to edit any row · Limits auto-apply to teams on save
-            </p>
-          </div>
-        </div>
+
+  <div>
+
+    <h2 className="text-lg font-semibold">
+
+      Pricing & Inventory Matrix ({financialYear})
+
+    </h2>
+
+    <p className="text-xs text-slate-500 mt-0.5">
+
+      {pricing.length} plans · Click edit to modify unlocked rows
+
+    </p>
+
+  </div>
+
+  <div className="flex items-center gap-3">
+
+    <button
+  onClick={addEmptyPricingRow}
+  className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700"
+>
+  + Add Pricing Plan
+</button>
+
+  </div>
+
+</div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Period", "Partner Type", "Price + GST", "CV Access", "NVites", "Job Postings", "Last Updated", ""].map((h) => (
-                  <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                    {h}
-                  </th>
-                ))}
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Period</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Partner Type</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Price + GST</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">CV Access</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">NVites</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Job Postings</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Lock Status</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Last Updated</th>
+                <th className="px-5 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wide pr-10">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {pricing.map((item) => (
+              {pricing.map((plan) => (
                 <PricingRow
-                  key={item.id}
-                  item={item}
-                  onSave={(updated) =>
-                    setPricing((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
-                  }
+  key={plan.id}
+  item={plan}
+  financialYear={financialYear}
+  setPricing={setPricing}
+  onRefreshPricing={fetchPricing}
+  onSave={(updated) => {
+                    setPricing((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+                  }}
                 />
               ))}
+              {pricing.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-5 py-10 text-center text-slate-400 text-sm">
+                    No pricing matrices defined for this year.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ================================================= */}
-      {/* TEAM MASTER LIST */}
-      {/* ================================================= */}
-
+      {/* Team Master List */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap gap-3 justify-between items-center">
           <div>
             <h2 className="text-lg font-semibold">Team Master List</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              {teams.filter((t) => t.is_active).length} active teams ·{" "}
-              {teams.reduce((s, t) => s + t.licences, 0)} total licences
+              {teams.filter((t) => t.is_active).length} active teams · {teams.reduce((s, t) => s + t.licences, 0)} total licences
             </p>
           </div>
           <div className="flex gap-3 items-center">
@@ -649,20 +886,20 @@ export default function MasterData() {
               placeholder="Search teams..."
               value={searchTeam}
               onChange={(e) => setSearchTeam(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-52"
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-52 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
-            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={showInactive}
                 onChange={(e) => setShowInactive(e.target.checked)}
-                className="rounded"
+                className="rounded text-purple-600 focus:ring-purple-500 h-4 w-4"
               />
               Show inactive
             </label>
             <button
               onClick={() => setEditingTeam("new")}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700"
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 shadow-sm"
             >
               <Plus className="w-4 h-4" /> Add Team
             </button>
@@ -673,39 +910,20 @@ export default function MasterData() {
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th
-                  className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700"
-                  onClick={() => toggleSort("name")}
-                >
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700" onClick={() => toggleSort("name")}>
                   Team <SortIcon field="name" />
                 </th>
-                <th
-                  className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700"
-                  onClick={() => toggleSort("licences")}
-                >
+                <th className="px-5 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700 font-semibold" onClick={() => toggleSort("licences")}>
                   Licences <SortIcon field="licences" />
                 </th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  Partner Type
-                </th>
-                <th
-                  className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700"
-                  onClick={() => toggleSort("join_period")}
-                >
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Partner Type</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700" onClick={() => toggleSort("join_period")}>
                   Period <SortIcon field="join_period" />
                 </th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  CV / NVites / Jobs
-                </th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  Licence Fee
-                </th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  Status
-                </th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  Last Updated
-                </th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">CV / NVites / Jobs</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Licence Fee</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Status</th>
+                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Last Updated</th>
                 <th className="px-5 py-3" />
               </tr>
             </thead>
@@ -713,42 +931,35 @@ export default function MasterData() {
               {filtered.map((team) => (
                 <tr key={team.id} className={`border-b border-slate-100 hover:bg-slate-50 transition ${!team.is_active ? "opacity-60" : ""}`}>
                   <td className="px-5 py-3">
-                    <p className="text-sm font-medium">{team.name}</p>
+                    <p className="text-sm font-medium text-slate-900">{team.name}</p>
                     <p className="text-xs text-slate-400">{team.partner_email || "—"}</p>
                   </td>
-                  <td className="px-5 py-3 text-sm font-semibold text-center">{team.licences}</td>
+                  <td className="px-5 py-3 text-sm font-semibold text-center text-slate-700">{team.licences}</td>
                   <td className="px-5 py-3 text-sm">
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
                       {team.partner_type}
                     </span>
                   </td>
                   <td className="px-5 py-3 text-sm text-slate-600">{team.join_period}</td>
                   <td className="px-5 py-3 text-sm">
-                    <span className="font-medium">{fmt(team.total_limits.cv)}</span>
+                    <span className="font-medium text-slate-800">{fmt(team.total_limits.cv)}</span>
                     <span className="text-slate-400 mx-1">/</span>
-                    <span className="font-medium">{fmt(team.total_limits.nvites)}</span>
+                    <span className="font-medium text-slate-800">{fmt(team.total_limits.nvites)}</span>
                     <span className="text-slate-400 mx-1">/</span>
-                    <span className="font-medium">{team.total_limits.jobs}</span>
+                    <span className="font-medium text-slate-800">{team.total_limits.jobs}</span>
                     {team.licences > 1 && (
                       <p className="text-xs text-slate-400 mt-0.5">
                         {fmt(team.per_licence_limits.cv)} / {fmt(team.per_licence_limits.nvites)} / {team.per_licence_limits.jobs} per licence
                       </p>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-sm font-medium">
-                    {fmtCurrency(team.licence_fee)}
-                  </td>
-                  <td className="px-5 py-3">
-                    <StatusBadge active={team.is_active} />
-                  </td>
+                  <td className="px-5 py-3 text-sm font-medium text-slate-900">{fmtCurrency(team.licence_fee)}</td>
+                  <td className="px-5 py-3"><StatusBadge active={team.is_active} /></td>
                   <td className="px-5 py-3 text-xs text-slate-400">
                     {team.updated_at ? new Date(team.updated_at).toLocaleDateString("en-IN") : "—"}
                   </td>
-                  <td className="px-5 py-3">
-                    <button
-                      onClick={() => setEditingTeam(team)}
-                      className="text-purple-500 hover:text-purple-700"
-                    >
+                  <td className="px-5 py-3 text-right pr-6">
+                    <button onClick={() => setEditingTeam(team)} className="text-purple-500 hover:text-purple-700 transition">
                       <Edit2 className="w-4 h-4" />
                     </button>
                   </td>
@@ -766,14 +977,12 @@ export default function MasterData() {
         </div>
       </div>
 
-      {/* ================================================= */}
-      {/* EDIT / ADD MODAL */}
-      {/* ================================================= */}
-
+      {/* Edit/Add Team Modal */}
       {editingTeam !== null && (
         <TeamEditModal
           team={editingTeam === "new" ? null : editingTeam}
           pricing={pricing}
+          financialYear={financialYear}
           onClose={() => setEditingTeam(null)}
           onSave={(updated) => {
             setTeams((prev) => {

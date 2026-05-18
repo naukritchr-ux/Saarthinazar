@@ -159,7 +159,7 @@ def generate_invoices(db: Session):
 
             invoice_number=generate_invoice_number(),
 
-            partner_name=team.team_name,
+            partner_name=team.name,
 
             financial_year="2025-2026",
 

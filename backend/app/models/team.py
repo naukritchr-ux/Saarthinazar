@@ -47,10 +47,29 @@ class Team(Base):
         default=""
     )
 
+    # =====================================================
+    # FINANCIAL YEAR
+    # =====================================================
+
+    financial_year = Column(
+        String(20),
+        nullable=False,
+        default="2025-2026",
+        index=True
+    )
+
+    # =====================================================
+    # LICENCES
+    # =====================================================
+
     licences = Column(
         Integer,
         default=1
     )
+
+    # =====================================================
+    # PARTNER CONFIG
+    # =====================================================
 
     partner_type = Column(
         String(100),
@@ -77,7 +96,7 @@ class Team(Base):
     )
 
     # =====================================================
-    # LIMITS
+    # INVENTORY LIMITS
     # =====================================================
 
     cv_limit = Column(
@@ -93,6 +112,30 @@ class Team(Base):
     jobs_limit = Column(
         Integer,
         default=0
+    )
+
+    # =====================================================
+    # OPTIONAL CUSTOM OVERRIDES
+    # =====================================================
+
+    custom_cv_limit = Column(
+        Integer,
+        nullable=True
+    )
+
+    custom_nvites_limit = Column(
+        Integer,
+        nullable=True
+    )
+
+    custom_jobs_limit = Column(
+        Integer,
+        nullable=True
+    )
+
+    custom_licence_fee = Column(
+        Float,
+        nullable=True
     )
 
     # =====================================================
@@ -126,6 +169,11 @@ class Team(Base):
     # =====================================================
     # TIMESTAMPS
     # =====================================================
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
 
     updated_at = Column(
         DateTime(timezone=True),

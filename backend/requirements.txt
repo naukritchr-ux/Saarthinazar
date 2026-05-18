@@ -7,8 +7,10 @@ passlib[bcrypt]
 python-multipart
 pandas
 openpyxl
-xlrd
+xlrd==2.0.1
 google-api-python-client
 google-auth
-xlrd==2.0.1
-pip install xlrd==2.0.1
+reportlab
+num2words
+supabase
+httpx

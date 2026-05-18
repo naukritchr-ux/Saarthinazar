@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  useNavigate,
+  useLocation
+} from "react-router-dom";
 import {
   FileUp, AlertCircle, TrendingUp, Users,
   FileText, DollarSign, Plus, X, RefreshCw,
@@ -54,8 +57,8 @@ interface FinancialYear {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-
-  const [financialYear, setFinancialYear] = useState("2025-2026");
+  const location = useLocation();
+  const [financialYear, setFinancialYear] = useState("");
   const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [criticalTeams, setCriticalTeams] = useState<CriticalTeam[]>([]);
@@ -72,18 +75,48 @@ export default function Dashboard() {
   // FETCH FINANCIAL YEARS
   // ===================================================
 
-  useEffect(() => {
-    fetch(`${API}/dashboard/financial-years`)
-      .then((r) => r.json())
-      .then((data: FinancialYear[]) => {
-        if (Array.isArray(data) && data.length) {
-          setFinancialYears(data);
-          const active = data.find((y) => y.is_active) ?? data[0];
-          if (active) setFinancialYear(active.label);
+useEffect(() => {
+
+  fetch(`${API}/dashboard/financial-years`)
+    .then((r) => r.json())
+    .then((data: FinancialYear[]) => {
+
+      if (Array.isArray(data) && data.length) {
+
+        setFinancialYears(data);
+
+        // ==========================================
+        // PRIORITY 1:
+        // FY passed from Alerts page
+        // ==========================================
+
+        if (location.state?.financialYear) {
+
+          setFinancialYear(
+            location.state.financialYear
+          );
+
+          return;
         }
-      })
-      .catch(() => undefined);
-  }, []);
+
+        // ==========================================
+        // PRIORITY 2:
+        // active FY
+        // ==========================================
+
+        const active =
+          data.find((y) => y.is_active)
+          ?? data[0];
+
+        if (active) {
+
+          setFinancialYear(active.label);
+        }
+      }
+    })
+    .catch(() => undefined);
+
+}, [location.state]);
 
   // ===================================================
   // LISTEN FOR UPLOAD EVENT — refresh dashboard immediately after upload
@@ -107,37 +140,106 @@ export default function Dashboard() {
   // FETCH DASHBOARD DATA when FY changes or refreshKey bumps
   // ===================================================
 
-  useEffect(() => {
-    if (!financialYear) return;
+useEffect(() => {
 
-    setLoading(true);
+  if (!financialYear) return;
 
-    const token = localStorage.getItem("token");
-    const headers = { Authorization: `Bearer ${token}` };
-    const fy = encodeURIComponent(financialYear);
+  let cancelled = false;
 
-    Promise.all([
-      fetch(`${API}/dashboard/summary?financial_year=${fy}`, { headers }).then((r) => r.json()),
-      fetch(`${API}/dashboard/critical?financial_year=${fy}`, { headers }).then((r) => r.json()),
-      fetch(`${API}/dashboard/teams?financial_year=${fy}`, { headers }).then((r) => r.json()),
-    ])
-      .then(([summaryData, criticalData, teamsData]) => {
-        setSummary(summaryData);
-        setCriticalTeams(criticalData.slice(0, 5));
-        const sorted = [...teamsData]
-          .sort((a: any, b: any) => (b.usage?.cv ?? 0) - (a.usage?.cv ?? 0))
-          .slice(0, 10)
-          .map((t: any) => ({
-            name: t.name.length > 12 ? t.name.slice(0, 12) + "…" : t.name,
-            cv: t.usage?.cv ?? 0,
-            nvites: t.usage?.nvites ?? 0,
-            jobs: t.usage?.jobs ?? 0,
-          }));
-        setChartData(sorted);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [financialYear, refreshKey]);
+  setLoading(true);
+
+  // ==========================================
+  // CLEAR OLD DATA IMMEDIATELY
+  // prevents wrong FY data flash
+  // ==========================================
+
+  setSummary(null);
+
+  setCriticalTeams([]);
+
+  setChartData([]);
+
+  const token = localStorage.getItem("token");
+
+  const headers = {
+    Authorization: `Bearer ${token}`
+  };
+
+  const fy = encodeURIComponent(financialYear);
+
+  Promise.all([
+
+    fetch(
+      `${API}/dashboard/summary?financial_year=${fy}`,
+      { headers }
+    ).then((r) => r.json()),
+
+    fetch(
+      `${API}/dashboard/critical?financial_year=${fy}`,
+      { headers }
+    ).then((r) => r.json()),
+
+    fetch(
+      `${API}/dashboard/teams?financial_year=${fy}`,
+      { headers }
+    ).then((r) => r.json()),
+
+  ])
+    .then(([summaryData, criticalData, teamsData]) => {
+
+      // Ignore stale requests
+
+      if (cancelled) return;
+
+      setSummary(summaryData);
+
+      setCriticalTeams(
+        criticalData.slice(0, 5)
+      );
+
+      const sorted = [...teamsData]
+
+        .sort(
+          (a: any, b: any) =>
+            (b.usage?.cv ?? 0) -
+            (a.usage?.cv ?? 0)
+        )
+
+        .slice(0, 10)
+
+        .map((t: any) => ({
+
+          name:
+            t.name.length > 12
+              ? t.name.slice(0, 12) + "…"
+              : t.name,
+
+          cv: t.usage?.cv ?? 0,
+
+          nvites: t.usage?.nvites ?? 0,
+
+          jobs: t.usage?.jobs ?? 0,
+        }));
+
+      setChartData(sorted);
+    })
+
+    .catch(console.error)
+
+    .finally(() => {
+
+      if (!cancelled) {
+
+        setLoading(false);
+      }
+    });
+
+  return () => {
+
+    cancelled = true;
+  };
+
+}, [financialYear, refreshKey]);
 
   // ===================================================
   // ADD FINANCIAL YEAR
@@ -439,7 +541,13 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <button
-                    onClick={() => navigate("/alerts")}
+                    onClick={() =>
+                    navigate("/alerts", {
+                    state: {
+                    financialYear
+                    }
+                  })
+              }
                     className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition text-sm"
                   >
                     Review
