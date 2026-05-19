@@ -109,6 +109,7 @@ def seed_defaults(db: Session):
     if db.query(PricingPlan).count() == 0:
         for period, partner_type, price, cv, nvites, jobs in DEFAULT_PRICING:
             db.add(PricingPlan(
+                financial_year="2026-2027",
                 period=period,
                 partner_type=partner_type,
                 licence_fee=price,
@@ -325,8 +326,11 @@ def usage_totals(db: Session, team_id: int, financial_year: str) -> dict:
     }
 
 
-def topup_totals(db: Session, team_id: int) -> dict:
-    rows = db.query(TopUp).filter(TopUp.team_id == team_id).all()
+def topup_totals(db: Session, team_id: int, financial_year: str | None = None) -> dict:
+    query = db.query(TopUp).filter(TopUp.team_id == team_id)
+    if financial_year:
+        query = query.filter(TopUp.financial_year == financial_year)
+    rows = query.all()
     return {
         "cv": sum(row.cv_topup or 0 for row in rows),
         "nvites": sum(row.nvites_topup or 0 for row in rows),
@@ -382,7 +386,7 @@ def outstanding_for_team(db: Session, team_id: int) -> float:
 
 def team_payload(team: Team, db: Session, financial_year: str, include_financial: bool = False) -> dict:
     usage = usage_totals(db, team.id, financial_year)
-    topups = topup_totals(db, team.id)
+    topups = topup_totals(db, team.id, financial_year)
     limits = team_limits(team, db, financial_year)
     percentages = {key: usage_percent(usage[key], limits[key]) for key in INVENTORY_TYPES}
 
@@ -546,23 +550,80 @@ def alert_message(team: Team, db: Session, financial_year: str) -> dict:
     payload = team_payload(team, db, financial_year)
     items = overage_items(team, db, financial_year)
     overage_amount = sum(item["total"] for item in items)
-    lines = [
-        f"Usage Alert: {team.name}",
-        f"Dear {team.partner_name or 'Team'},",
-        "This is your current Naukri usage summary:",
-        f"CV Access: {payload['usage']['cv']} / {payload['total_limits']['cv']} ({payload['usage_percent']['cv']}%)",
-        f"NVites: {payload['usage']['nvites']} / {payload['total_limits']['nvites']} ({payload['usage_percent']['nvites']}%)",
-        f"Job Postings: {payload['usage']['jobs']} / {payload['total_limits']['jobs']} ({payload['usage_percent']['jobs']}%)",
-        "Member-wise breakdown:",
-    ]
-    lines.extend(
-        f"- {row['name']} ({row['email']}): CV {row['cv_usage']}, NVites {row['nvites_usage']}, Jobs {row['jobs_usage']}"
+    usage = payload["usage"]
+    limits = payload["total_limits"]
+    remaining = payload["remaining"]
+
+    def pct(u, l):
+        return round((u / l) * 100) if l else 0
+
+    member_lines = [
+        f"  - {row['name'] or row['email']} ({row['email']}): "
+        f"CV {row['cv_usage']:,} | NVites {row['nvites_usage']:,} | Jobs {row['jobs_usage']}"
         for row in payload["subusers"]
+    ]
+
+    status_line = (
+        "LIMIT EXCEEDED"
+        if payload["status"] == "Over limit"
+        else ("CRITICAL - Approaching Limit"
+              if payload["status"] == "Critical"
+              else "WARNING - High Usage")
     )
-    if overage_amount:
-        lines.append(f"Overage invoice amount including GST: Rs {round(overage_amount)}")
-    lines.append("Please review your usage and plan accordingly.")
-    return {"team": payload, "overage_items": items, "overage_amount": overage_amount, "message": "\n".join(lines)}
+
+    overage_line = (
+        f"\nOverage amount due (incl. GST): Rs. {round(overage_amount):,}\n"
+        if overage_amount > 0 else ""
+    )
+
+    # Formal email body
+    email_body = (
+        f"Dear {team.partner_name or team.name},\n\n"
+        f"We hope this message finds you well.\n\n"
+        f"This is an automated usage alert from Talent Corner HR Services "
+        f"regarding your Naukri.com account for Financial Year {financial_year}.\n\n"
+        f"STATUS: {status_line}\n\n"
+        f"USAGE SUMMARY\n"
+        f"{'=' * 40}\n"
+        f"CV Access    : {usage['cv']:>8,} used / {limits['cv']:>8,} allocated  "
+        f"({pct(usage['cv'], limits['cv'])}%)  "
+        f"| Remaining: {remaining['cv']:,}\n"
+        f"NVites       : {usage['nvites']:>8,} used / {limits['nvites']:>8,} allocated  "
+        f"({pct(usage['nvites'], limits['nvites'])}%)  "
+        f"| Remaining: {remaining['nvites']:,}\n"
+        f"Job Postings : {usage['jobs']:>8,} used / {limits['jobs']:>8,} allocated  "
+        f"({pct(usage['jobs'], limits['jobs'])}%)  "
+        f"| Remaining: {remaining['jobs']:,}\n\n"
+        f"MEMBER-WISE BREAKDOWN\n"
+        f"{'=' * 40}\n"
+        + "\n".join(member_lines) + "\n"
+        + overage_line
+        + "\nWe request you to review your usage at the earliest and plan accordingly. "
+        f"Should you wish to purchase additional inventory or discuss your account, "
+        f"please do not hesitate to contact us.\n\n"
+        f"Thank you for your continued partnership.\n\n"
+        f"Warm regards,\n"
+        f"Operations Team\n"
+        f"Talent Corner HR Services Pvt. Ltd."
+    )
+
+    return {
+        "team": payload,
+        "overage_items": items,
+        "overage_amount": overage_amount,
+        "message": email_body,
+        # Flat fields expected by the alerts route
+        "cv_usage": usage["cv"],
+        "cv_limit": limits["cv"],
+        "nvites_usage": usage["nvites"],
+        "nvites_limit": limits["nvites"],
+        "jobs_usage": usage["jobs"],
+        "jobs_limit": limits["jobs"],
+        "cv_remaining": remaining["cv"],
+        "nvites_remaining": remaining["nvites"],
+        "jobs_remaining": remaining["jobs"],
+        "members": payload["subusers"],
+    }
 
 
 # ---------------------------------------------------------------------------

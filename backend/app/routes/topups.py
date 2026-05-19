@@ -13,7 +13,13 @@ router = APIRouter(prefix="/topups")
 
 
 @router.get("/")
-def list_topups(db: Session = Depends(get_db)):
+def list_topups(
+    financial_year: str | None = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(TopUp).order_by(TopUp.created_at.desc())
+    if financial_year:
+        query = query.filter(TopUp.financial_year == financial_year)
     return [
         {
             "id": item.id,
@@ -30,7 +36,7 @@ def list_topups(db: Session = Depends(get_db)):
             "added_by": item.added_by,
             "created_at": item.created_at.isoformat() if item.created_at else None,
         }
-        for item in db.query(TopUp).order_by(TopUp.created_at.desc()).all()
+        for item in query.all()
     ]
 
 
@@ -115,14 +121,6 @@ def create_topup(
 
     db.add(topup)
     db.flush()
-
-    # =====================================
-    # IMMEDIATELY INCREASE LIMITS
-    # =====================================
-
-    team.cv_limit = (team.cv_limit or 0) + cv_topup
-    team.nvites_limit = (team.nvites_limit or 0) + nvites_topup
-    team.jobs_limit = (team.jobs_limit or 0) + jobs_topup
 
     # =====================================
     # CREATE INVOICE

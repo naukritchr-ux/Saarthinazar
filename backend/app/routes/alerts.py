@@ -250,9 +250,8 @@ def send_alert(
             recipient=team.partner_email,
 
             subject=(
-                f"Naukri Usage Alert "
-                f"({financial_year}) — "
-                f"{team.name}"
+                f"Naukri.com Usage Alert — "
+                f"{team.name} | FY {financial_year}"
             ),
 
             body=alert.get("message", ""),
