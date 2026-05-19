@@ -262,14 +262,25 @@ export default function TopUps() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Amount (Rs.)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Amount (Rs.) <span className="text-slate-400 font-normal text-xs">— auto-calculated, edit to override</span></label>
               <input
                 type="number"
-                value={manualAmount ? manualAmountVal : (autoTotal || '')}
+                value={manualAmount ? manualAmountVal : (autoTotal > 0 ? autoTotal : '')}
                 onChange={(e) => { setManualAmount(true); setManualAmountVal(e.target.value); }}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                onFocus={(e) => { if (!manualAmount && autoTotal > 0) { setManualAmount(true); setManualAmountVal(String(autoTotal)); } }}
+                className={`w-full px-4 py-2 border rounded-lg ${
+                  manualAmount && Number(manualAmountVal) !== autoTotal
+                    ? 'border-amber-400 bg-amber-50'
+                    : 'border-slate-300'
+                }`}
                 placeholder="0" min="0" required
               />
+              {manualAmount && Number(manualAmountVal) !== autoTotal && autoTotal > 0 && (
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-xs text-amber-700">Overriding auto total of Rs. {autoTotal.toLocaleString('en-IN')}</p>
+                  <button type="button" onClick={() => { setManualAmount(false); setManualAmountVal(''); }} className="text-xs text-purple-600 hover:underline">Reset to auto</button>
+                </div>
+              )}
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm">

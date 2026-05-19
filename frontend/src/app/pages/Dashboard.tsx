@@ -103,21 +103,12 @@ export default function Dashboard() {
     const headers = { Authorization: `Bearer ${token}` };
     const fy = encodeURIComponent(financialYear);
 
-    Promise.all([
-      fetch(`${API}/dashboard/summary?financial_year=${fy}`, { headers }).then((r) => {
-        if (!r.ok) throw new Error(`Summary fetch failed: ${r.status}`);
+    fetch(`${API}/dashboard/all?financial_year=${fy}`, { headers })
+      .then((r) => {
+        if (!r.ok) throw new Error(`Dashboard fetch failed: ${r.status}`);
         return r.json();
-      }),
-      fetch(`${API}/dashboard/critical?financial_year=${fy}`, { headers }).then((r) => {
-        if (!r.ok) throw new Error(`Critical fetch failed: ${r.status}`);
-        return r.json();
-      }),
-      fetch(`${API}/dashboard/teams?financial_year=${fy}`, { headers }).then((r) => {
-        if (!r.ok) throw new Error(`Teams fetch failed: ${r.status}`);
-        return r.json();
-      }),
-    ])
-      .then(([summaryData, criticalData, teamsData]) => {
+      })
+      .then(({ summary: summaryData, critical: criticalData, teams: teamsData }) => {
         if (cancelled) return;
         setSummary(summaryData);
         setCriticalTeams(Array.isArray(criticalData) ? criticalData.slice(0, 5) : []);
