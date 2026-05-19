@@ -28,7 +28,7 @@ import {
 
 import { useFY } from "../context/FYContext";
 
-const API = "http://127.0.0.1:8000";
+import API from "../services/api";
 
 export default function FinancialInsights() {
 

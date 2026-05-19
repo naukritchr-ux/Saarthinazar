@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { useFY } from "../context/FYContext";
 
-const API = "http://127.0.0.1:8000";
+import API from "../services/api";
 
 interface Summary {
   financial_year: string;

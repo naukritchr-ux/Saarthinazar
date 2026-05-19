@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Clock, RefreshCw, AlertCircle } from 'lucide-react';
 import { useFY } from '../context/FYContext';
 
-const API = 'http://127.0.0.1:8000';
+import API from "../services/api";
 
 interface Team {
   id: number;

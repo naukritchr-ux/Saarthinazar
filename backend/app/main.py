@@ -27,12 +27,19 @@ app = FastAPI(
 # CORS
 # =====================================================
 
+# Build allowed origins: always include localhost for dev,
+# plus any FRONTEND_URL set in production env
+_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+_frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+if _frontend_url:
+    _origins.append(_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

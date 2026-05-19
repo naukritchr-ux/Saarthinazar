@@ -5,7 +5,9 @@ import {
 } from "lucide-react";
 import { useFY } from "../context/FYContext";
 
-const API = "http://127.0.0.1:8000";
+import API from "../services/api";
+
+const _API = API;
 const token = () => localStorage.getItem("token");
 const authHeaders = () => ({
   "Content-Type": "application/json",

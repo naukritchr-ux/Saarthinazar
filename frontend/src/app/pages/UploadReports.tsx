@@ -4,6 +4,8 @@ import {
   useEffect,
 } from "react";
 
+import API from "../services/api";
+
 import { useNavigate } from "react-router-dom";
 import { useRole } from "../context/RoleContext";
 
@@ -103,7 +105,7 @@ export default function UploadReports() {
   // =====================================================
 
   const fetchHistory = () => {
-    fetch("http://127.0.0.1:8000/reports/")
+    fetch(`${API}/reports/`)
       .then((res) => res.json())
       .then((data) => setUploadHistory(data))
       .catch(console.error);
@@ -193,7 +195,7 @@ export default function UploadReports() {
       formData.append("job_posting_report", jobPostingFile);
 
       const response = await fetch(
-        "http://127.0.0.1:8000/reports/upload",
+        `${API}/reports/upload`,
         {
           method: "POST",
           body: formData,

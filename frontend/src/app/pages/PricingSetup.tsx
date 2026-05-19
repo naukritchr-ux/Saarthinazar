@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Plus, Trash2, Save } from "lucide-react";
 import { useFY } from "../context/FYContext";
 
-const API = "http://127.0.0.1:8000";
+import API from "../services/api";
+
+const _API = API;
 
 interface PricingRow {
   id: string;

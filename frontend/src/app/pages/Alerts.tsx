@@ -9,7 +9,7 @@ import {
   RefreshCw, AlertCircle, CheckCircle,
 } from "lucide-react";
 
-const API = "http://127.0.0.1:8000";
+import API from "../services/api";
 
 interface Member {
   name: string;

@@ -7,7 +7,9 @@ import {
   ReactNode,
 } from "react";
 
-const API = "http://127.0.0.1:8000";
+import API from "../services/api";
+
+const _API = API;
 
 export interface FinancialYear {
   id: number;
