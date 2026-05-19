@@ -1,17 +1,115 @@
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, Query
 
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 
+from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.team import Team
+from app.models.topup import TopUp
+from app.models.usage import SubUserUsage
 
 from app.services.naukri_rules import (
+    BILLING_RULES,
+    INVENTORY_TYPES,
     alert_message,
-    status_for_team
+    overage_items,
+    status_for_percent,
+    usage_percent,
 )
 
 router = APIRouter(prefix="/alerts")
+
+
+# =====================================================
+# BULK HELPERS (mirrors dashboard bulk loader)
+# =====================================================
+
+def _bulk_load_alerts(db: Session, team_ids: list[int], financial_year: str) -> dict:
+    usage_rows = (
+        db.query(SubUserUsage)
+        .filter(
+            SubUserUsage.team_id.in_(team_ids),
+            SubUserUsage.financial_year == financial_year,
+        )
+        .all()
+    )
+    usage_by_team = defaultdict(lambda: {"cv": 0, "nvites": 0, "jobs": 0})
+    subusers_by_team = defaultdict(list)
+    for row in usage_rows:
+        usage_by_team[row.team_id]["cv"] += row.cv_usage or 0
+        usage_by_team[row.team_id]["nvites"] += row.nvites_usage or 0
+        usage_by_team[row.team_id]["jobs"] += row.jobs_usage or 0
+        subusers_by_team[row.team_id].append({
+            "name": row.name,
+            "email": row.email,
+            "cv_usage": row.cv_usage or 0,
+            "nvites_usage": row.nvites_usage or 0,
+            "jobs_usage": row.jobs_usage or 0,
+        })
+
+    topup_rows = (
+        db.query(TopUp)
+        .filter(
+            TopUp.team_id.in_(team_ids),
+            TopUp.financial_year == financial_year,
+        )
+        .all()
+    )
+    topups_by_team = defaultdict(lambda: {"cv": 0, "nvites": 0, "jobs": 0})
+    for row in topup_rows:
+        topups_by_team[row.team_id]["cv"] += row.cv_topup or 0
+        topups_by_team[row.team_id]["nvites"] += row.nvites_topup or 0
+        topups_by_team[row.team_id]["jobs"] += row.jobs_topup or 0
+
+    adj_rows = (
+        db.query(InventoryAdjustment)
+        .filter(
+            InventoryAdjustment.team_id.in_(team_ids),
+            InventoryAdjustment.financial_year == financial_year,
+        )
+        .all()
+    )
+    adj_by_team = defaultdict(lambda: {"cv": 0, "nvites": 0, "jobs": 0})
+    for row in adj_rows:
+        adj_by_team[row.team_id]["cv"] += row.cv_adjustment or 0
+        adj_by_team[row.team_id]["nvites"] += row.nvites_adjustment or 0
+        adj_by_team[row.team_id]["jobs"] += row.jobs_adjustment or 0
+
+    return {
+        "usage": usage_by_team,
+        "topups": topups_by_team,
+        "adjustments": adj_by_team,
+        "subusers": subusers_by_team,
+    }
+
+
+def _limits_from_bulk(team: Team, bulk: dict) -> dict:
+    licences = team.licences or 1
+    topups = bulk["topups"][team.id]
+    adjs = bulk["adjustments"][team.id]
+    return {
+        "cv": (team.cv_limit or 0) * licences + topups["cv"] + adjs["cv"],
+        "nvites": (team.nvites_limit or 0) * licences + topups["nvites"] + adjs["nvites"],
+        "jobs": (team.jobs_limit or 0) * licences + topups["jobs"] + adjs["jobs"],
+    }
+
+
+import math
+
+def _overage_amount_from_bulk(usage: dict, limits: dict) -> float:
+    total = 0.0
+    for key in INVENTORY_TYPES:
+        overage = max(0, usage[key] - limits[key])
+        if overage <= 0:
+            continue
+        rule = BILLING_RULES[key]
+        billed = math.ceil(overage / rule["multiple"]) * rule["multiple"]
+        subtotal = billed * rule["rate"]
+        total += subtotal + subtotal * 0.18
+    return round(total, 2)
 
 
 # =====================================================
@@ -26,142 +124,53 @@ def get_alerts(
     financial_year: str = Query(...),
     db: Session = Depends(get_db),
 ):
-
-    alerts = []
-
-    # ==========================================
-    # IMPORTANT
-    # ==========================================
-    # We still fetch active teams,
-    # but all calculations below MUST use
-    # financial_year-aware usage logic
-    # through:
-    #
-    # status_for_team(team, db, financial_year)
-    #
-    # and:
-    #
-    # alert_message(team, db, financial_year)
-    #
-    # Otherwise all values become 0 after
-    # FY-based usage separation.
-    # ==========================================
-
     teams = (
         db.query(Team)
-        .filter(
-            Team.is_active == True
-        )
+        .filter(Team.is_active == True)
         .order_by(Team.name)
         .all()
     )
 
+    if not teams:
+        return []
+
+    team_ids = [t.id for t in teams]
+    bulk = _bulk_load_alerts(db, team_ids, financial_year)
+
+    alerts = []
     for team in teams:
+        usage = dict(bulk["usage"][team.id])
+        limits = _limits_from_bulk(team, bulk)
+        percentages = {key: usage_percent(usage[key], limits[key]) for key in INVENTORY_TYPES}
+        status = status_for_percent(max(percentages.values(), default=0))
 
-        # ==========================================
-        # FY-AWARE STATUS
-        # ==========================================
-
-        status = status_for_team(
-            team,
-            db,
-            financial_year
-        )
-
-        # ==========================================
-        # ONLY SHOW WARNING+
-        # ==========================================
-
-        if status not in {
-            "Warning",
-            "Critical",
-            "Over limit"
-        }:
+        if status not in {"Warning", "Critical", "Over limit"}:
             continue
 
-        # ==========================================
-        # FY-AWARE ALERT DATA
-        # ==========================================
-
-        alert = alert_message(
-            team,
-            db,
-            financial_year
-        )
+        remaining = {key: limits[key] - usage[key] for key in INVENTORY_TYPES}
+        overage_amount = _overage_amount_from_bulk(usage, limits)
+        members = bulk["subusers"][team.id]
 
         alerts.append({
-
             "team_id": team.id,
-
             "team_name": team.name,
-
-            "partner_name": (
-                getattr(team, "partner_name", "")
-                or team.name
-            ),
-
-            "partner_email": (
-                getattr(team, "partner_email", "")
-                or ""
-            ),
-
-            "type": (
-                "exceeded"
-                if status == "Over limit"
-                else status.lower()
-            ),
-
+            "partner_name": getattr(team, "partner_name", "") or team.name,
+            "partner_email": getattr(team, "partner_email", "") or "",
+            "type": "exceeded" if status == "Over limit" else status.lower(),
             "status": status,
-
             "financial_year": financial_year,
-
-            "cv_usage": (
-                alert.get("cv_usage", 0)
-            ),
-
-            "cv_limit": (
-                alert.get("cv_limit", 0)
-            ),
-
-            "nvites_usage": (
-                alert.get("nvites_usage", 0)
-            ),
-
-            "nvites_limit": (
-                alert.get("nvites_limit", 0)
-            ),
-
-            "jobs_usage": (
-                alert.get("jobs_usage", 0)
-            ),
-
-            "jobs_limit": (
-                alert.get("jobs_limit", 0)
-            ),
-
-            "cv_remaining": (
-                alert.get("cv_remaining", 0)
-            ),
-
-            "nvites_remaining": (
-                alert.get("nvites_remaining", 0)
-            ),
-
-            "jobs_remaining": (
-                alert.get("jobs_remaining", 0)
-            ),
-
-            "overage_amount": (
-                alert.get("overage_amount", 0)
-            ),
-
-            "members": (
-                alert.get("members", [])
-            ),
-
-            "message": (
-                alert.get("message", "")
-            )
+            "cv_usage": usage["cv"],
+            "cv_limit": limits["cv"],
+            "nvites_usage": usage["nvites"],
+            "nvites_limit": limits["nvites"],
+            "jobs_usage": usage["jobs"],
+            "jobs_limit": limits["jobs"],
+            "cv_remaining": remaining["cv"],
+            "nvites_remaining": remaining["nvites"],
+            "jobs_remaining": remaining["jobs"],
+            "overage_amount": overage_amount,
+            "members": members,
+            "message": "",
         })
 
     return alerts
