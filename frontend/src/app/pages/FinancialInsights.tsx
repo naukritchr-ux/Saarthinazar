@@ -26,39 +26,36 @@ import {
   authHeaders
 } from "../services/authService";
 
+import { useFY } from "../context/FYContext";
+
 const API = "http://127.0.0.1:8000";
 
 export default function FinancialInsights() {
 
-  const [financialYear, setFinancialYear] = useState(
-    "2025-2026"
-  );
+  const { financialYear, setFinancialYear, financialYears } = useFY();
 
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchInsights = async () => {
-
+    setError(null);
     try {
-
       const response = await fetch(
-
         `${API}/financial/insights?financial_year=${financialYear}`,
-
-        {
-          headers: authHeaders(),
-        }
+        { headers: authHeaders() }
       );
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        setError(`Error ${response.status}: ${errJson.detail || response.statusText}`);
+        return;
+      }
 
       const json = await response.json();
-
       setData(json);
-
-    } catch (error) {
-
-      console.error(
-        "Failed to fetch financial insights",
-        error
-      );
+    } catch (err: any) {
+      setError(err.message || "Failed to fetch financial insights");
+      console.error("Failed to fetch financial insights", err);
     }
   };
 
@@ -68,10 +65,19 @@ export default function FinancialInsights() {
 
   }, [financialYear]);
 
-  if (!data) {
-
+  if (error) {
     return (
       <div className="p-8">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-800">
+          <strong>Failed to load financial insights:</strong> {error}
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="p-8 text-slate-600">
         Loading financial insights...
       </div>
     );
@@ -131,11 +137,11 @@ export default function FinancialInsights() {
 
         >
 
-          <option>2025-2026</option>
-
-          <option>2026-2027</option>
-
-          <option>2027-2028</option>
+          {financialYears.length > 0
+            ? financialYears.map((y) => (
+                <option key={y.id} value={y.label}>{y.label}</option>
+              ))
+            : <option value={financialYear}>{financialYear}</option>}
 
         </select>
 

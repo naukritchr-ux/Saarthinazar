@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
 import {
-  useLocation,
   useNavigate
 } from "react-router-dom";
+import { useFY } from "../context/FYContext";
 import {
   Send, MessageSquare, Mail, X,
   RefreshCw, AlertCircle, CheckCircle,
@@ -40,12 +40,6 @@ interface AlertTeam {
   message: string;
 }
 
-interface FinancialYear {
-  id: number;
-  label: string;
-  is_active: boolean;
-}
-
 // =====================================================
 // WHATSAPP MESSAGE GENERATOR
 // =====================================================
@@ -64,28 +58,31 @@ function buildWhatsAppMessage(a: AlertTeam): string {
   const memberLines = (a.members || [])
     .map(
       (m) =>
-        `  • ${m.name || m.email}\n` +
-        `    CV: ${(m.cv_usage ?? 0).toLocaleString()} | NVites: ${m.nvites_usage.toLocaleString()} | Jobs: ${m.jobs_usage}`
+        `  • ${m.name || m.email} (${m.email})\n` +
+        `    CV: ${(m.cv_usage ?? 0).toLocaleString("en-IN")} | NVites: ${m.nvites_usage.toLocaleString("en-IN")} | Jobs: ${m.jobs_usage}`
     )
     .join("\n");
 
   const overageLine =
     a.overage_amount > 0
-      ? `\n⚠️ *Overage Amount Due: ₹${a.overage_amount.toLocaleString()}*\nPlease clear this at the earliest.\n`
+      ? `\n⚠️ *Overage Amount Due (incl. GST): ₹${a.overage_amount.toLocaleString("en-IN")}*\nKindly clear this at the earliest.\n`
       : "";
 
   return (
-    `Hello ${a.partner_name || a.team_name},\n\n` +
+    `Dear ${a.partner_name || a.team_name},\n\n` +
     `${statusLine}\n\n` +
-    `Here is your current Naukri usage status:\n\n` +
+    `We hope this message finds you well. This is a usage alert from *Talent Corner HR Services* regarding your Naukri.com account.\n\n` +
     `📊 *Usage Summary*\n` +
-    `• CV Access: ${a.cv_usage.toLocaleString()} / ${a.cv_limit.toLocaleString()} (${pct(a.cv_usage, a.cv_limit)}%) — Remaining: ${a.cv_remaining.toLocaleString()}\n` +
-    `• NVites: ${a.nvites_usage.toLocaleString()} / ${a.nvites_limit.toLocaleString()} (${pct(a.nvites_usage, a.nvites_limit)}%) — Remaining: ${a.nvites_remaining.toLocaleString()}\n` +
-    `• Job Postings: ${a.jobs_usage} / ${a.jobs_limit} (${pct(a.jobs_usage, a.jobs_limit)}%) — Remaining: ${a.jobs_remaining}\n\n` +
+    `• CV Access    : ${a.cv_usage.toLocaleString("en-IN")} / ${a.cv_limit.toLocaleString("en-IN")} (${pct(a.cv_usage, a.cv_limit)}%) — Remaining: ${a.cv_remaining.toLocaleString("en-IN")}\n` +
+    `• NVites       : ${a.nvites_usage.toLocaleString("en-IN")} / ${a.nvites_limit.toLocaleString("en-IN")} (${pct(a.nvites_usage, a.nvites_limit)}%) — Remaining: ${a.nvites_remaining.toLocaleString("en-IN")}\n` +
+    `• Job Postings : ${a.jobs_usage} / ${a.jobs_limit} (${pct(a.jobs_usage, a.jobs_limit)}%) — Remaining: ${a.jobs_remaining}\n\n` +
     `👥 *Member-wise Breakdown*\n${memberLines}\n` +
     `${overageLine}\n` +
-    `Please review your usage and plan accordingly. Reach out if you'd like to discuss a top-up.\n\n` +
-    `Regards,\nTalent Corner Operations`
+    `We request you to kindly review your usage and plan accordingly. Should you wish to purchase additional inventory, please reach out to us.\n\n` +
+    `Thank you for your continued partnership.\n\n` +
+    `Warm regards,\n` +
+    `Operations Team\n` +
+    `Talent Corner HR Services Pvt. Ltd.`
   );
 }
 
@@ -96,32 +93,42 @@ function buildEmailBody(a: AlertTeam): string {
   const memberRows = (a.members || [])
     .map(
       (m) =>
-        `${m.name || m.email} | CV: ${(m.cv_usage ?? 0).toLocaleString()} | NVites: ${m.nvites_usage.toLocaleString()} | Jobs: ${m.jobs_usage}`
+        `  - ${m.name || m.email} (${m.email})\n` +
+        `    CV: ${(m.cv_usage ?? 0).toLocaleString("en-IN")} | NVites: ${m.nvites_usage.toLocaleString("en-IN")} | Jobs: ${m.jobs_usage}`
     )
     .join("\n");
 
+  const statusLine =
+    a.type === "exceeded"
+      ? "LIMIT EXCEEDED"
+      : a.type === "critical"
+      ? "CRITICAL - Approaching Limit"
+      : "WARNING - High Usage";
+
   const overageLine =
     a.overage_amount > 0
-      ? `\nOVERAGE AMOUNT DUE: ₹${a.overage_amount.toLocaleString()}\n`
+      ? `\nOVERAGE AMOUNT DUE (incl. GST): Rs. ${a.overage_amount.toLocaleString("en-IN")}\nKindly arrange payment at the earliest.\n`
       : "";
 
   return (
     `Dear ${a.partner_name || a.team_name},\n\n` +
-    `This is an automated usage alert from Talent Corner for your Naukri account.\n\n` +
+    `We hope this message finds you well.\n\n` +
+    `This is an automated usage alert from Talent Corner HR Services regarding your Naukri.com account.\n\n` +
+    `STATUS: ${statusLine}\n\n` +
     `USAGE SUMMARY\n` +
-    `-------------\n` +
-    `CV Access:    ${a.cv_usage.toLocaleString()} / ${a.cv_limit.toLocaleString()} (${pct(a.cv_usage, a.cv_limit)}%)  — Remaining: ${a.cv_remaining.toLocaleString()}\n` +
-    `NVites:       ${a.nvites_usage.toLocaleString()} / ${a.nvites_limit.toLocaleString()} (${pct(a.nvites_usage, a.nvites_limit)}%)  — Remaining: ${a.nvites_remaining.toLocaleString()}\n` +
-    `Job Postings: ${a.jobs_usage} / ${a.jobs_limit} (${pct(a.jobs_usage, a.jobs_limit)}%)  — Remaining: ${a.jobs_remaining}\n\n` +
+    `${'='.repeat(50)}\n` +
+    `CV Access    : ${a.cv_usage.toLocaleString("en-IN").padStart(8)} used / ${a.cv_limit.toLocaleString("en-IN").padStart(8)} allocated  (${pct(a.cv_usage, a.cv_limit)}%)  | Remaining: ${a.cv_remaining.toLocaleString("en-IN")}\n` +
+    `NVites       : ${a.nvites_usage.toLocaleString("en-IN").padStart(8)} used / ${a.nvites_limit.toLocaleString("en-IN").padStart(8)} allocated  (${pct(a.nvites_usage, a.nvites_limit)}%)  | Remaining: ${a.nvites_remaining.toLocaleString("en-IN")}\n` +
+    `Job Postings : ${String(a.jobs_usage).padStart(8)} used / ${String(a.jobs_limit).padStart(8)} allocated  (${pct(a.jobs_usage, a.jobs_limit)}%)  | Remaining: ${a.jobs_remaining}\n\n` +
     `MEMBER-WISE BREAKDOWN\n` +
-    `---------------------\n` +
+    `${'='.repeat(50)}\n` +
     `${memberRows}\n` +
     `${overageLine}\n` +
-    `Please review your usage and plan accordingly. If you would like to purchase a top-up, ` +
-    `please reply to this email or contact your account manager.\n\n` +
-    `Best regards,\n` +
+    `We request you to review your usage at the earliest and plan accordingly. Should you wish to purchase additional inventory or discuss your account, please do not hesitate to contact us.\n\n` +
+    `Thank you for your continued partnership.\n\n` +
+    `Warm regards,\n` +
     `Operations Team\n` +
-    `Talent Corner`
+    `Talent Corner HR Services Pvt. Ltd.`
   );
 }
 
@@ -153,10 +160,8 @@ function pct(u: number, l: number) {
 
 export default function Alerts() {
 
-  const location = useLocation();
   const navigate = useNavigate();
-  const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
-  const [financialYear, setFinancialYear] = useState("2025-2026");
+  const { financialYear, setFinancialYear, financialYears } = useFY();
   const [alerts, setAlerts] = useState<AlertTeam[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -165,52 +170,6 @@ export default function Alerts() {
   const [previewTab, setPreviewTab] = useState<"whatsapp" | "email">("whatsapp");
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [sentIds, setSentIds] = useState<Set<number>>(new Set());
-
-  // ---------------------------------------------------
-  // Fetch financial years
-  // ---------------------------------------------------
-  useEffect(() => {
-
-  fetch(`${API}/dashboard/financial-years`)
-    .then((r) => r.json())
-    .then((data: FinancialYear[]) => {
-
-      if (Array.isArray(data) && data.length) {
-
-        setFinancialYears(data);
-
-        // ==========================================
-        // PRIORITY 1:
-        // FY from Dashboard
-        // ==========================================
-
-        if (location.state?.financialYear) {
-
-          setFinancialYear(
-            location.state.financialYear
-          );
-
-          return;
-        }
-
-        // ==========================================
-        // PRIORITY 2:
-        // active FY
-        // ==========================================
-
-        const active =
-          data.find((y) => y.is_active)
-          ?? data[0];
-
-        if (active) {
-
-          setFinancialYear(active.label);
-        }
-      }
-    })
-    .catch(() => undefined);
-
-}, [location.state]);
 
   // ---------------------------------------------------
   // Fetch alerts
@@ -267,7 +226,7 @@ export default function Alerts() {
   // Open email client with pre-filled draft
   // ---------------------------------------------------
   const openEmail = (a: AlertTeam) => {
-    const subject = encodeURIComponent(`Naukri Usage Alert — ${a.team_name}`);
+    const subject = encodeURIComponent(`Naukri.com Usage Alert — ${a.team_name} | FY ${financialYear}`);
     const body = encodeURIComponent(buildEmailBody(a));
     const to = encodeURIComponent(a.partner_email || "");
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
@@ -408,17 +367,11 @@ export default function Alerts() {
                     {sendingId === a.team_id ? "Sending..." : "Send Email"}
                   </button>
                   <button
-                    onClick={() =>
-                    navigate("/dashboard", {
-                    state: {
-                    financialYear
-                  }
-                  })
-                }
-  className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
->
-  Review
-</button>
+                    onClick={() => navigate("/dashboard")}
+                  className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
+                >
+                  Review
+                </button>
                 </div>
               </div>
 

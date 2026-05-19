@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  useNavigate,
-  useLocation
-} from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   FileUp, AlertCircle, TrendingUp, Users,
   FileText, DollarSign, Plus, X, RefreshCw,
@@ -11,6 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from "recharts";
+import { useFY } from "../context/FYContext";
 
 const API = "http://127.0.0.1:8000";
 
@@ -49,22 +47,18 @@ interface CriticalTeam {
   usage_percent: { cv: number; nvites: number; jobs: number };
 }
 
-interface FinancialYear {
-  id: number;
-  label: string;
-  is_active: boolean;
-}
-
 export default function Dashboard() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const [financialYear, setFinancialYear] = useState("");
-  const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
+
+  // ── FY from shared context ──────────────────────────
+  const { financialYear, setFinancialYear, financialYears, refreshFYs, isLoading: fyLoading } = useFY();
+
   const [summary, setSummary] = useState<Summary | null>(null);
   const [criticalTeams, setCriticalTeams] = useState<CriticalTeam[]>([]);
   const [chartData, setChartData] = useState<ChartTeam[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0); // bumped after upload to force re-fetch
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   const [showYearModal, setShowYearModal] = useState(false);
   const [newYear, setNewYear] = useState("");
@@ -72,215 +66,123 @@ export default function Dashboard() {
   const [yearMessage, setYearMessage] = useState("");
 
   // ===================================================
-  // FETCH FINANCIAL YEARS
+  // LISTEN FOR UPLOAD EVENT — refresh after upload
   // ===================================================
-
-useEffect(() => {
-
-  fetch(`${API}/dashboard/financial-years`)
-    .then((r) => r.json())
-    .then((data: FinancialYear[]) => {
-
-      if (Array.isArray(data) && data.length) {
-
-        setFinancialYears(data);
-
-        // ==========================================
-        // PRIORITY 1:
-        // FY passed from Alerts page
-        // ==========================================
-
-        if (location.state?.financialYear) {
-
-          setFinancialYear(
-            location.state.financialYear
-          );
-
-          return;
-        }
-
-        // ==========================================
-        // PRIORITY 2:
-        // active FY
-        // ==========================================
-
-        const active =
-          data.find((y) => y.is_active)
-          ?? data[0];
-
-        if (active) {
-
-          setFinancialYear(active.label);
-        }
-      }
-    })
-    .catch(() => undefined);
-
-}, [location.state]);
-
-  // ===================================================
-  // LISTEN FOR UPLOAD EVENT — refresh dashboard immediately after upload
-  // ===================================================
-
   useEffect(() => {
     const handleUpload = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.financialYear && detail.financialYear !== financialYear) {
         setFinancialYear(detail.financialYear);
       } else {
-        // Same FY — bump refreshKey to force re-fetch
         setRefreshKey((k) => k + 1);
       }
     };
     window.addEventListener("reportUploaded", handleUpload);
     return () => window.removeEventListener("reportUploaded", handleUpload);
-  }, [financialYear]);
+  }, [financialYear, setFinancialYear]);
 
   // ===================================================
-  // FETCH DASHBOARD DATA when FY changes or refreshKey bumps
+  // FETCH DASHBOARD DATA
   // ===================================================
+  useEffect(() => {
+    // Don't fetch if FY is not set
+    if (!financialYear) {
+      setLoading(false);
+      return;
+    }
 
-useEffect(() => {
+    let cancelled = false;
 
-  if (!financialYear) return;
+    setLoading(true);
+    setDashboardError(null);
+    setSummary(null);
+    setCriticalTeams([]);
+    setChartData([]);
 
-  let cancelled = false;
+    const token = localStorage.getItem("token");
+    const headers = { Authorization: `Bearer ${token}` };
+    const fy = encodeURIComponent(financialYear);
 
-  setLoading(true);
-
-  // ==========================================
-  // CLEAR OLD DATA IMMEDIATELY
-  // prevents wrong FY data flash
-  // ==========================================
-
-  setSummary(null);
-
-  setCriticalTeams([]);
-
-  setChartData([]);
-
-  const token = localStorage.getItem("token");
-
-  const headers = {
-    Authorization: `Bearer ${token}`
-  };
-
-  const fy = encodeURIComponent(financialYear);
-
-  Promise.all([
-
-    fetch(
-      `${API}/dashboard/summary?financial_year=${fy}`,
-      { headers }
-    ).then((r) => r.json()),
-
-    fetch(
-      `${API}/dashboard/critical?financial_year=${fy}`,
-      { headers }
-    ).then((r) => r.json()),
-
-    fetch(
-      `${API}/dashboard/teams?financial_year=${fy}`,
-      { headers }
-    ).then((r) => r.json()),
-
-  ])
-    .then(([summaryData, criticalData, teamsData]) => {
-
-      // Ignore stale requests
-
-      if (cancelled) return;
-
-      setSummary(summaryData);
-
-      setCriticalTeams(
-        criticalData.slice(0, 5)
-      );
-
-      const sorted = [...teamsData]
-
-        .sort(
-          (a: any, b: any) =>
-            (b.usage?.cv ?? 0) -
-            (a.usage?.cv ?? 0)
-        )
-
-        .slice(0, 10)
-
-        .map((t: any) => ({
-
-          name:
-            t.name.length > 12
-              ? t.name.slice(0, 12) + "…"
-              : t.name,
-
-          cv: t.usage?.cv ?? 0,
-
-          nvites: t.usage?.nvites ?? 0,
-
-          jobs: t.usage?.jobs ?? 0,
-        }));
-
-      setChartData(sorted);
-    })
-
-    .catch(console.error)
-
-    .finally(() => {
-
-      if (!cancelled) {
-
+    Promise.all([
+      fetch(`${API}/dashboard/summary?financial_year=${fy}`, { headers }).then((r) => {
+        if (!r.ok) throw new Error(`Summary fetch failed: ${r.status}`);
+        return r.json();
+      }),
+      fetch(`${API}/dashboard/critical?financial_year=${fy}`, { headers }).then((r) => {
+        if (!r.ok) throw new Error(`Critical fetch failed: ${r.status}`);
+        return r.json();
+      }),
+      fetch(`${API}/dashboard/teams?financial_year=${fy}`, { headers }).then((r) => {
+        if (!r.ok) throw new Error(`Teams fetch failed: ${r.status}`);
+        return r.json();
+      }),
+    ])
+      .then(([summaryData, criticalData, teamsData]) => {
+        if (cancelled) return;
+        setSummary(summaryData);
+        setCriticalTeams(Array.isArray(criticalData) ? criticalData.slice(0, 5) : []);
+        const sorted = (Array.isArray(teamsData) ? teamsData : [])
+          .sort((a: any, b: any) => (b.usage?.cv ?? 0) - (a.usage?.cv ?? 0))
+          .slice(0, 10)
+          .map((t: any) => ({
+            name: t.name.length > 12 ? t.name.slice(0, 12) + "…" : t.name,
+            cv: t.usage?.cv ?? 0,
+            nvites: t.usage?.nvites ?? 0,
+            jobs: t.usage?.jobs ?? 0,
+          }));
+        setChartData(sorted);
         setLoading(false);
-      }
-    });
+      })
+      .catch((err) => {
+        console.error("Dashboard fetch error:", err);
+        if (!cancelled) {
+          setDashboardError(err.message);
+          setLoading(false);
+        }
+      });
 
-  return () => {
-
-    cancelled = true;
-  };
-
-}, [financialYear, refreshKey]);
+    return () => { cancelled = true; };
+  }, [financialYear, refreshKey]);
 
   // ===================================================
   // ADD FINANCIAL YEAR
   // ===================================================
-
   const handleAddFinancialYear = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newYear) {
-      setYearMessage("Please enter a financial year.");
-      return;
+    if (!newYear) { 
+      setYearMessage("Please enter a financial year (e.g., 2026-2027)."); 
+      return; 
     }
+    
     const body = new FormData();
     body.append("label", newYear);
     body.append("uploaded_by", localStorage.getItem("username") || "Kajal");
     if (masterFile) body.append("master_file", masterFile);
 
-    const response = await fetch(`${API}/financial-years/`, { method: "POST", body });
-    const result = await response.json();
-    setYearMessage(result.message || "Financial year saved.");
-    if (result.status === "success") {
-      setFinancialYears((prev) => {
-        const exists = prev.find((y) => y.label === result.financial_year.label);
-        return exists ? prev : [result.financial_year, ...prev];
-      });
-      setFinancialYear(result.financial_year.label);
-      setNewYear("");
-      setMasterFile(null);
-      setShowYearModal(false);
+    try {
+      const response = await fetch(`${API}/financial-years/`, { method: "POST", body });
+      const result = await response.json();
+      setYearMessage(result.message || "Financial year saved.");
+      if (result.status === "success") {
+        refreshFYs();
+        setFinancialYear(result.financial_year.label);
+        setNewYear("");
+        setMasterFile(null);
+        setShowYearModal(false);
+      }
+    } catch (error) {
+      setYearMessage("Error adding financial year. Please try again.");
+      console.error(error);
     }
   };
 
   const uploadReminder = summary?.upload_reminder ?? false;
-  const uploadOverdue  = summary?.upload_overdue  ?? false;
+  const uploadOverdue = summary?.upload_overdue ?? false;
   const daysSinceUpload = summary?.days_since_upload ?? null;
 
   const formatDate = (d: string | null) => {
     if (!d) return "Never";
-    return new Date(d).toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "short",
-    });
+    return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   };
 
   return (
@@ -293,17 +195,29 @@ useEffect(() => {
           <p className="text-slate-600">Overview of usage and billing activity</p>
         </div>
         <div className="flex items-center gap-3">
-          <select
-            value={financialYear}
-            onChange={(e) => setFinancialYear(e.target.value)}
-            className="px-4 py-2 border border-slate-300 rounded-xl bg-white"
-          >
-            {financialYears.length > 0
-              ? financialYears.map((y) => (
-                  <option key={y.id} value={y.label}>FY {y.label}</option>
+          {/* FY SELECTOR */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-slate-700">Financial Year:</label>
+            <select
+              value={financialYear}
+              onChange={(e) => setFinancialYear(e.target.value)}
+              disabled={fyLoading || financialYears.length === 0}
+              className="px-4 py-2 border border-slate-300 rounded-xl bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
+            >
+              {fyLoading ? (
+                <option>Loading years...</option>
+              ) : financialYears.length > 0 ? (
+                financialYears.map((y) => (
+                  <option key={y.id} value={y.label}>
+                    FY {y.label}
+                  </option>
                 ))
-              : <option value={financialYear}>FY {financialYear}</option>}
-          </select>
+              ) : (
+                <option value={financialYear}>FY {financialYear}</option>
+              )}
+            </select>
+          </div>
+
           <button
             onClick={() => setShowYearModal(true)}
             className="px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition flex items-center gap-2"
@@ -313,128 +227,114 @@ useEffect(() => {
         </div>
       </div>
 
+      {/* ERROR BANNER */}
+      {dashboardError && (
+        <div className="bg-red-50 border border-red-300 rounded-xl p-4 mb-6 flex items-center gap-3">
+          <AlertCircle className="text-red-600 w-5 h-5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium text-red-900">Error loading dashboard</p>
+            <p className="text-sm text-red-800 mt-1">{dashboardError}</p>
+          </div>
+          <button
+            onClick={() => setDashboardError(null)}
+            className="text-red-500 hover:text-red-700"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
       {/* UPLOAD OVERDUE BANNER */}
-      {uploadOverdue && (
+      {uploadOverdue && !loading && (
         <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mb-6 flex items-center gap-3">
           <AlertCircle className="text-amber-600 w-5 h-5 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-amber-900 font-medium">Upload Reminder</p>
-            <p className="text-amber-800 text-sm">
-              {daysSinceUpload !== null
-                ? `No fresh report uploaded in ${daysSinceUpload} days.`
-                : "No reports uploaded yet for this financial year."}{" "}
-              Please upload the weekly Resdex and Job Posting reports.
+            <p className="font-medium text-amber-900">Weekly reports overdue</p>
+            <p className="text-sm text-amber-800 mt-1">
+              {daysSinceUpload === null
+                ? "No reports uploaded for this financial year."
+                : `Last upload was ${daysSinceUpload} days ago. Please update your weekly data.`}
             </p>
           </div>
           <button
             onClick={() => navigate("/upload-reports")}
-            className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 transition"
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition text-sm flex-shrink-0"
           >
             Upload Now
           </button>
         </div>
       )}
 
-      {/* LOADING */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="w-6 h-6 animate-spin text-purple-600" />
+      {/* LOADING STATE */}
+      {(loading || fyLoading) && (
+        <div className="grid grid-cols-4 gap-6 mb-8">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded mb-4 w-24"></div>
+              <div className="h-8 bg-slate-200 rounded w-32"></div>
+            </div>
+          ))}
         </div>
       )}
 
-      {!loading && summary && (
+      {/* MAIN CONTENT — only show when not loading */}
+      {!loading && !fyLoading && summary && (
         <>
-          {/* STAT CARDS */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-
+          {/* KPI CARDS */}
+          <div className="grid grid-cols-4 gap-6 mb-8">
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <FileText className="w-5 h-5 text-purple-600" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-600 text-sm">Total Teams</p>
+                  <p className="text-3xl font-bold mt-2">{summary.total_teams}</p>
                 </div>
-                <h3 className="text-slate-600">Total CV Usage</h3>
+                <Users className="w-12 h-12 text-blue-100" />
               </div>
-              <p className="text-3xl mb-1">{summary.total_cv_usage.toLocaleString("en-IN")}</p>
-              <p className="text-sm text-slate-500">across {summary.total_teams} teams</p>
             </div>
 
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <TrendingUp className="w-5 h-5 text-purple-600" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-600 text-sm">CV Access Used</p>
+                  <p className="text-3xl font-bold mt-2">{(summary.total_cv_usage / 1000).toFixed(1)}k</p>
                 </div>
-                <h3 className="text-slate-600">Total NVites Usage</h3>
+                <FileText className="w-12 h-12 text-green-100" />
               </div>
-              <p className="text-3xl mb-1">{summary.total_nvites_usage.toLocaleString("en-IN")}</p>
-              <p className="text-sm text-slate-500">FY {financialYear}</p>
             </div>
 
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <Users className="w-5 h-5 text-purple-600" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-600 text-sm">Outstanding Invoices</p>
+                  <p className="text-3xl font-bold mt-2">₹{(summary.outstanding_invoices / 100000).toFixed(1)}L</p>
                 </div>
-                <h3 className="text-slate-600">Total Job Postings</h3>
+                <DollarSign className="w-12 h-12 text-orange-100" />
               </div>
-              <p className="text-3xl mb-1">{summary.total_job_postings.toLocaleString("en-IN")}</p>
-              <p className="text-sm text-slate-500">FY {financialYear}</p>
             </div>
 
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-600 text-sm">Alert Teams</p>
+                  <p className="text-3xl font-bold mt-2 text-red-600">
+                    {summary.critical_teams + summary.warning_teams}
+                  </p>
                 </div>
-                <h3 className="text-slate-600">Critical Teams</h3>
+                <AlertCircle className="w-12 h-12 text-red-100" />
               </div>
-              <p className="text-3xl mb-1">{summary.critical_teams}</p>
-              <p className="text-sm text-slate-500">
-                {summary.warning_teams} warning · {summary.critical_teams} critical
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                  <DollarSign className="w-5 h-5 text-orange-600" />
-                </div>
-                <h3 className="text-slate-600">Outstanding Invoices</h3>
-              </div>
-              <p className="text-3xl mb-1">
-                ₹{summary.outstanding_invoices.toLocaleString("en-IN")}
-              </p>
-              <p className="text-sm text-slate-500">
-                {summary.outstanding_invoice_count} pending payment{summary.outstanding_invoice_count !== 1 ? "s" : ""}
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3 mb-2">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${uploadOverdue ? "bg-amber-100" : "bg-green-100"}`}>
-                  <FileUp className={`w-5 h-5 ${uploadOverdue ? "text-amber-600" : "text-green-600"}`} />
-                </div>
-                <h3 className="text-slate-600">Last Upload</h3>
-              </div>
-              <p className="text-3xl mb-1">{formatDate(summary.last_upload_date)}</p>
-              <p className={`text-sm ${uploadOverdue ? "text-amber-600 font-medium" : "text-slate-500"}`}>
-                {daysSinceUpload !== null
-                  ? `${daysSinceUpload} day${daysSinceUpload !== 1 ? "s" : ""} ago`
-                  : "No uploads yet"}
-              </p>
             </div>
           </div>
 
-          {/* CHARTS + CRITICAL TEAMS */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-              <h3 className="text-lg mb-4">Top Teams — CV Usage</h3>
+          {/* CHARTS & ALERTS */}
+          <div className="grid grid-cols-3 gap-6 mb-8">
+            <div className="col-span-2 bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+              <h3 className="text-lg mb-4">Top 10 Teams by CV Usage</h3>
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
+                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
+                    <YAxis />
                     <Tooltip />
                     <Bar dataKey="cv" fill="#7B2CBF" radius={[6, 6, 0, 0]} />
                   </BarChart>
@@ -463,36 +363,28 @@ useEffect(() => {
                 <div className="space-y-3">
                   {criticalTeams.map((team) => {
                     const isOver = team.status === "Over limit";
-                    const colorClass = isOver
-                      ? "bg-red-50 border-red-200"
-                      : team.status === "Critical"
+                    const colorClass = isOver || team.status === "Critical"
                       ? "bg-red-50 border-red-200"
                       : "bg-orange-50 border-orange-200";
                     const badgeClass = isOver
                       ? "bg-red-700 text-white"
                       : team.status === "Critical"
-                      ? "bg-red-500 text-white"
-                      : "bg-orange-500 text-white";
+                        ? "bg-red-500 text-white"
+                        : "bg-orange-500 text-white";
                     const worstPct = Math.max(
                       team.usage_percent?.cv ?? 0,
                       team.usage_percent?.nvites ?? 0,
                       team.usage_percent?.jobs ?? 0
                     );
                     return (
-                      <div
-                        key={team.id}
-                        className={`flex items-center justify-between p-3 border rounded-lg ${colorClass}`}
-                      >
+                      <div key={team.id} className={`flex items-center justify-between p-3 border rounded-lg ${colorClass}`}>
                         <div>
                           <p className="font-medium text-sm">{team.name}</p>
                           <p className="text-xs text-slate-600 mt-0.5">
-                            CV: {team.usage?.cv?.toLocaleString()} / {team.total_limits?.cv?.toLocaleString()} ·{" "}
-                            Peak: {worstPct}%
+                            CV: {team.usage?.cv?.toLocaleString()} / {team.total_limits?.cv?.toLocaleString()} · Peak: {worstPct}%
                           </p>
                         </div>
-                        <span className={`px-2 py-1 text-xs rounded-full ${badgeClass}`}>
-                          {team.status}
-                        </span>
+                        <span className={`px-2 py-1 text-xs rounded-full ${badgeClass}`}>{team.status}</span>
                       </div>
                     );
                   })}
@@ -541,13 +433,7 @@ useEffect(() => {
                     </div>
                   </div>
                   <button
-                    onClick={() =>
-                    navigate("/alerts", {
-                    state: {
-                    financialYear
-                    }
-                  })
-              }
+                    onClick={() => navigate("/alerts")}
                     className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition text-sm"
                   >
                     Review
@@ -595,9 +481,7 @@ useEffect(() => {
             <div className="p-6 border-b border-slate-200 flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-medium">Add Financial Year</h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  Add a new financial year to begin tracking usage.
-                </p>
+                <p className="text-sm text-slate-600 mt-1">Add a new financial year to begin tracking usage.</p>
               </div>
               <button onClick={() => setShowYearModal(false)} className="text-slate-500 hover:text-slate-800">
                 <X className="w-5 h-5" />
@@ -605,20 +489,16 @@ useEffect(() => {
             </div>
             <form onSubmit={handleAddFinancialYear} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Financial Year
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Financial Year</label>
                 <input
                   value={newYear}
                   onChange={(e) => setNewYear(e.target.value)}
-                  placeholder="2027-2028"
+                  placeholder="2026-2027"
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Master Data File (optional)
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Master Data File (optional)</label>
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv"
@@ -627,24 +507,17 @@ useEffect(() => {
                 />
               </div>
               {yearMessage && (
-                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-sm text-purple-900">
+                <div className={`border rounded-xl p-3 text-sm ${
+                  yearMessage.includes("success") || yearMessage.includes("saved")
+                    ? "bg-green-50 border-green-200 text-green-900"
+                    : "bg-purple-50 border-purple-200 text-purple-900"
+                }`}>
                   {yearMessage}
                 </div>
               )}
               <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowYearModal(false)}
-                  className="px-4 py-2 border border-slate-300 rounded-lg text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
-                >
-                  Save Year
-                </button>
+                <button type="button" onClick={() => { setShowYearModal(false); setYearMessage(""); }} className="px-4 py-2 border border-slate-300 rounded-lg text-sm">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm">Save Year</button>
               </div>
             </form>
           </div>

@@ -36,7 +36,7 @@ export async function loginUser(
   if (data?.access_token) {
 
     localStorage.setItem(
-      "access_token",
+      "token",
       data.access_token
     );
   }
@@ -51,7 +51,7 @@ export async function loginUser(
 export function authHeaders() {
 
   const token = localStorage.getItem(
-    "access_token"
+    "token"
   );
 
   return {

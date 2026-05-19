@@ -9,6 +9,7 @@ import Invoices from "./pages/Invoices";
 import UploadReports from "./pages/UploadReports";
 import FinancialInsights from "./pages/FinancialInsights";
 import MasterData from "./pages/MasterData";
+import PricingSetup from "./pages/PricingSetup";
 import Login from "./pages/Login";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -60,6 +61,10 @@ export const router = createBrowserRouter([
       {
         path: "/master-data",
         element: <OwnerRoute><MasterData /></OwnerRoute>,
+      },
+      {
+        path: "/pricing-setup",
+        element: <OwnerRoute><PricingSetup /></OwnerRoute>,
       },
     ],
   },

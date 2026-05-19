@@ -3,6 +3,7 @@ import {
   Edit2, Save, X, Settings, Plus, RefreshCw,
   ChevronDown, ChevronUp, AlertCircle, Check, Lock, Unlock
 } from "lucide-react";
+import { useFY } from "../context/FYContext";
 
 const API = "http://127.0.0.1:8000";
 const token = () => localStorage.getItem("token");
@@ -636,7 +637,13 @@ const handleSave = async () => {
 // =====================================================
 
 export default function MasterData() {
-  const [financialYear, setFinancialYear] = useState("2025-2026");
+  const { financialYear: contextFY } = useFY();
+  const [financialYear, setFinancialYear] = useState(contextFY || "2025-2026");
+
+  // Sync with context default on first load
+  useEffect(() => {
+    if (contextFY && !financialYear) setFinancialYear(contextFY);
+  }, [contextFY]);
   const [pricing, setPricing] = useState<PricingPlan[]>([]);
 
   const addEmptyPricingRow = () => {
@@ -798,6 +805,22 @@ export default function MasterData() {
           All edits are timestamped and audit-logged automatically.
         </p>
       </div>
+
+      {/* No pricing warning for this FY */}
+      {pricing.length === 0 && !loading && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="text-amber-600 w-5 h-5 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-amber-900 font-medium text-sm">
+              No pricing matrix set for FY {financialYear}
+            </p>
+            <p className="text-amber-800 text-sm mt-0.5">
+              Before adding teams or recording usage for this year, Rashesh must define the pricing structure below.
+              Click <strong>+ Add Pricing Plan</strong> to get started.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Pricing Matrix */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">

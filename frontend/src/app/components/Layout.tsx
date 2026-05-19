@@ -15,19 +15,23 @@ import {
   Settings as SettingsIcon,
   Upload,
   LogOut,
+  ChevronDown,
 } from "lucide-react";
 
 import {
   useEffect,
   useState,
 } from "react";
+import { useFY } from "../context/FYContext";
 
 export default function Layout() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const { financialYear, setFinancialYear, financialYears, isLoading: fyLoading } = useFY();
 
   const [showWelcome, setShowWelcome] = useState(true);
+  const [fyDropdownOpen, setFyDropdownOpen] = useState(false);
 
   const role = localStorage.getItem("role") || "";
   const username = localStorage.getItem("username") || "User";
@@ -244,6 +248,51 @@ export default function Layout() {
                     </Link>
                   ))}
               </nav>
+            </div>
+
+            {/* CENTER — FY SELECTOR */}
+            <div className="flex-1 flex justify-center px-8">
+              <div className="relative">
+                <button
+                  onClick={() => setFyDropdownOpen(!fyDropdownOpen)}
+                  disabled={fyLoading}
+                  className="flex items-center gap-2 px-4 py-2 border border-slate-300 rounded-xl bg-white hover:bg-slate-50 disabled:bg-slate-100 disabled:cursor-not-allowed transition"
+                >
+                  <span className="font-medium text-slate-700">
+                    FY {financialYear || "Loading..."}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${fyDropdownOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {/* FY DROPDOWN */}
+                {fyDropdownOpen && (
+                  <div className="absolute top-full mt-2 left-0 w-48 bg-white border border-slate-300 rounded-xl shadow-lg z-50">
+                    {fyLoading ? (
+                      <div className="px-4 py-3 text-sm text-slate-500 text-center">Loading years...</div>
+                    ) : financialYears.length > 0 ? (
+                      financialYears.map((fy) => (
+                        <button
+                          key={fy.id}
+                          onClick={() => {
+                            setFinancialYear(fy.label);
+                            setFyDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-4 py-2 text-sm transition ${
+                            financialYear === fy.label
+                              ? "bg-purple-100 text-purple-700 font-medium"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          FY {fy.label}
+                          {fy.is_active && <span className="ml-2 text-xs text-green-600">● Active</span>}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-slate-500 text-center">No years found</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* RIGHT — user profile */}

@@ -1,14 +1,9 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Plus, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useFY } from "../context/FYContext";
 
 const API = "http://127.0.0.1:8000";
-
-interface FinancialYear {
-  id: number;
-  label: string;
-  is_active: boolean;
-}
 
 interface SubUser {
   id: number;
@@ -59,32 +54,12 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function TeamUsage() {
   const navigate = useNavigate();
+  const { financialYear, setFinancialYear, financialYears } = useFY();
 
-  const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
-  const [financialYear, setFinancialYear] = useState("");
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
-
-  // ===================================================
-  // FETCH FINANCIAL YEARS (for dropdown)
-  // ===================================================
-
-  useEffect(() => {
-    fetch(`${API}/dashboard/financial-years`)
-      .then((r) => r.json())
-      .then((data: FinancialYear[]) => {
-        setFinancialYears(data);
-        // Default to the active year, or first in list
-        const active = data.find((y) => y.is_active) ?? data[0];
-        if (active) setFinancialYear(active.label);
-      })
-      .catch(() => {
-        // Fallback if endpoint not yet available
-        setFinancialYear("2026-2027");
-      });
-  }, []);
 
   // ===================================================
   // FETCH TEAMS scoped to selected financial year

@@ -3,6 +3,7 @@ import {
   FileText, Download, CheckCircle, Clock, AlertTriangle,
   RefreshCw, DollarSign, X, Loader2,
 } from "lucide-react";
+import { useFY } from "../context/FYContext";
 
 const API = "http://127.0.0.1:8000";
 
@@ -22,12 +23,6 @@ interface Invoice {
   payment_date: string | null;
   pdf_path: string | null;
   notes: string;
-}
-
-interface FinancialYear {
-  id: number;
-  label: string;
-  is_active: boolean;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -149,8 +144,7 @@ function PartialPaymentModal({ invoice, onClose, onSave }: PartialModalProps) {
 // =====================================================
 export default function Invoices() {
   const [filter, setFilter] = useState<"all" | "paid" | "unpaid" | "partial">("all");
-  const [financialYear, setFinancialYear] = useState("2026-2027");
-  const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
+  const { financialYear, setFinancialYear, financialYears } = useFY();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -158,19 +152,6 @@ export default function Invoices() {
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [partialModal, setPartialModal] = useState<Invoice | null>(null);
-
-  useEffect(() => {
-    fetch(`${API}/dashboard/financial-years`)
-      .then((r) => r.json())
-      .then((data: FinancialYear[]) => {
-        if (Array.isArray(data) && data.length) {
-          setFinancialYears(data);
-          const active = data.find((y) => y.is_active) ?? data[0];
-          if (active) setFinancialYear(active.label);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
 
   const fetchInvoices = async (fy = financialYear) => {
     setLoading(true);
