@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Plus, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useFY } from "../context/FYContext";
@@ -200,9 +200,9 @@ export default function TeamUsage() {
                 {teams.map((team) => {
                   const expanded = expandedTeams.has(team.id);
                   return (
-                    <>
+                    <React.Fragment key={team.id}>
                       {/* TEAM ROW */}
-                      <tr key={team.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
+                      <tr key={`team-${team.id}`} className="border-b border-slate-100 hover:bg-slate-50 transition">
                         <td className="px-6 py-4">
                           <button onClick={() => toggleTeam(team.id)} className="text-slate-400 hover:text-slate-700">
                             {expanded
@@ -311,7 +311,7 @@ export default function TeamUsage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
