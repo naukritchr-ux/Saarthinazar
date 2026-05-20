@@ -63,15 +63,15 @@ def get_financial_insights(
     # Teams don't have a financial_year column — filter by teams
     # that have actual usage data in this financial year instead
     from app.models.usage import SubUserUsage
-    team_ids = (
-        db.query(SubUserUsage.team_id)
-        .filter(SubUserUsage.financial_year == financial_year)
+    from sqlalchemy import select
+    team_ids_subq = (
+        select(SubUserUsage.team_id)
+        .where(SubUserUsage.financial_year == financial_year)
         .distinct()
-        .subquery()
     )
     teams = (
         db.query(Team)
-        .filter(Team.id.in_(team_ids))
+        .filter(Team.id.in_(team_ids_subq))
         .order_by(Team.name)
         .all()
     )

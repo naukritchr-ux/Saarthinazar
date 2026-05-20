@@ -28,7 +28,7 @@ import {
 
 import { useFY } from "../context/FYContext";
 
-import API from "../services/api";
+import API, { apiFetch } from "../services/api";
 
 export default function FinancialInsights() {
 
@@ -40,9 +40,8 @@ export default function FinancialInsights() {
   const fetchInsights = async () => {
     setError(null);
     try {
-      const response = await fetch(
-        `${API}/financial/insights?financial_year=${financialYear}`,
-        { headers: authHeaders() }
+      const response = await apiFetch(
+        `/financial/insights?financial_year=${financialYear}`
       );
 
       if (!response.ok) {
@@ -60,9 +59,8 @@ export default function FinancialInsights() {
   };
 
   useEffect(() => {
-
+    if (!financialYear) return;
     fetchInsights();
-
   }, [financialYear]);
 
   if (error) {

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Lock, User, AlertTriangle } from "lucide-react";
+import { Lock, User, AlertTriangle, Clock } from "lucide-react";
 import { loginUser } from "../services/authService";
 import { useRole } from "../context/RoleContext";
 import type { Role } from "../context/RoleContext";
@@ -14,9 +14,21 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Show session-expired message if redirected here by apiFetch
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const msg = sessionStorage.getItem("authMessage");
+    if (msg) {
+      setSessionMessage(msg);
+      sessionStorage.removeItem("authMessage"); // only show once
+    }
+  }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSessionMessage(null);
     setLoading(true);
 
     try {
@@ -51,6 +63,15 @@ export default function Login() {
           <p className="text-slate-500 mt-2">Talent Corner — Internal Portal</p>
         </div>
 
+        {/* Session expired message */}
+        {sessionMessage && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-5 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+            <p className="text-amber-800 text-sm">{sessionMessage}</p>
+          </div>
+        )}
+
+        {/* Login error */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-5 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
