@@ -8,6 +8,7 @@ python-multipart
 pandas
 openpyxl
 xlrd==2.0.1
+psycopg2-binary
 google-api-python-client
 google-auth
 reportlab
