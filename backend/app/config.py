@@ -26,7 +26,7 @@ ALGORITHM = os.getenv(
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
     os.getenv(
         "ACCESS_TOKEN_EXPIRE_MINUTES",
-        "60"
+        "480"  # 8 hours — lasts a full work day
     )
 )
 

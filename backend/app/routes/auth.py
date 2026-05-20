@@ -146,3 +146,19 @@ def upload_pfp(
         "message": "Profile picture uploaded",
         "profile_picture": filepath
     }
+
+
+# DELETE PROFILE PICTURE
+@router.delete("/delete-pfp")
+def delete_pfp(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.profile_picture:
+        # Delete file from disk if it exists
+        if os.path.exists(current_user.profile_picture):
+            os.remove(current_user.profile_picture)
+        current_user.profile_picture = None
+        db.commit()
+
+    return {"message": "Profile picture removed"}
