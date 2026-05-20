@@ -138,11 +138,15 @@ export default function Layout() {
     setPasswordSuccess(false);
 
     try {
+      const token = localStorage.getItem("token");
       const response = await fetch(
         "http://127.0.0.1:8000/auth/change-password",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({
             old_password: oldPassword,
             new_password: newPassword,
@@ -181,6 +185,24 @@ export default function Layout() {
       window.location.reload();
     };
     reader.readAsDataURL(file);
+  };
+
+  // =====================================================
+  // DELETE PROFILE PICTURE
+  // =====================================================
+
+  const handleDeleteProfilePicture = async () => {
+    const token = localStorage.getItem("token");
+    try {
+      await fetch("http://127.0.0.1:8000/auth/delete-pfp", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Even if backend fails, clear locally
+    }
+    localStorage.removeItem("profileImage");
+    window.location.reload();
   };
 
   // =====================================================
@@ -347,6 +369,15 @@ export default function Layout() {
                       onChange={handleProfileUpload}
                     />
                   </label>
+
+                  {profileImage && (
+                    <button
+                      onClick={handleDeleteProfilePicture}
+                      className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50"
+                    >
+                      Remove Profile Image
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setShowPasswordModal(true)}
