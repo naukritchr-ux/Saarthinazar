@@ -140,7 +140,7 @@ export default function Layout() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "http://127.0.0.1:8000/auth/change-password",
+        "import.meta.env.VITE_API_URL/auth/change-password",
         {
           method: "POST",
           headers: {
@@ -194,7 +194,7 @@ export default function Layout() {
   const handleDeleteProfilePicture = async () => {
     const token = localStorage.getItem("token");
     try {
-      await fetch("http://127.0.0.1:8000/auth/delete-pfp", {
+      await fetch("import.meta.env.VITE_API_URL/auth/delete-pfp", {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
