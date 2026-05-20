@@ -32,7 +32,9 @@ app = FastAPI(
 _origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://saarthinazar.onrender.com",
+    "https://saarthinazar-git-main-tchr-s-projects.vercel.app",
+
+    "https://saarthinazar-54lws0qbx-tchr-s-projects.vercel.app",
 ]
 _frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
 if _frontend_url:
