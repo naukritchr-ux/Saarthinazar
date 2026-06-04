@@ -204,7 +204,9 @@ class ReportProcessor:
 
         header_row = 1
 
-        if "job" in filename:
+        # Job posting files: Naukri exports them as "Job Posting Report..."
+        # or "SUSER-..." (Sub-User wise report). Both need header_row=4.
+        if "job" in filename or "suser" in filename:
 
             header_row = 4
 

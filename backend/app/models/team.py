@@ -47,6 +47,12 @@ class Team(Base):
         default=""
     )
 
+    # Contact / billing details (used on invoice Bill To section)
+    address = Column(String(500), nullable=True, default="")
+    phone   = Column(String(50),  nullable=True, default="")
+    gstin   = Column(String(20),  nullable=True, default="")
+    state_code = Column(String(10), nullable=True, default="")
+
     # =====================================================
     # FINANCIAL YEAR
     # =====================================================

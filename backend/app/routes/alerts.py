@@ -59,10 +59,13 @@ def _bulk_load_alerts(db: Session, team_ids: list[int], financial_year: str) -> 
         .all()
     )
     topups_by_team = defaultdict(lambda: {"cv": 0, "nvites": 0, "jobs": 0})
+    topup_cv_items_by_team: dict[int, list[int]] = defaultdict(list)
     for row in topup_rows:
         topups_by_team[row.team_id]["cv"] += row.cv_topup or 0
         topups_by_team[row.team_id]["nvites"] += row.nvites_topup or 0
         topups_by_team[row.team_id]["jobs"] += row.jobs_topup or 0
+        if row.cv_topup and row.cv_topup > 0:
+            topup_cv_items_by_team[row.team_id].append(row.cv_topup)
 
     adj_rows = (
         db.query(InventoryAdjustment)
@@ -81,6 +84,7 @@ def _bulk_load_alerts(db: Session, team_ids: list[int], financial_year: str) -> 
     return {
         "usage": usage_by_team,
         "topups": topups_by_team,
+        "topup_cv_items": topup_cv_items_by_team,
         "adjustments": adj_by_team,
         "subusers": subusers_by_team,
     }
@@ -159,6 +163,10 @@ def get_alerts(
             "type": "exceeded" if status == "Over limit" else status.lower(),
             "status": status,
             "financial_year": financial_year,
+            "licence_count": team.licences or 1,
+            "cv_limit_base": team.cv_limit or 0,
+            "topup_cv_total": bulk["topups"][team.id]["cv"],
+            "topup_cv_list": bulk["topup_cv_items"].get(team.id, []),
             "cv_usage": usage["cv"],
             "cv_limit": limits["cv"],
             "nvites_usage": usage["nvites"],

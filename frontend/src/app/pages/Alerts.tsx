@@ -26,6 +26,12 @@ interface AlertTeam {
   partner_email: string;
   type: "warning" | "critical" | "exceeded";
   status: string;
+  // new fields from backend
+  licence_count: number;
+  cv_limit_base: number;
+  topup_cv_total: number;
+  topup_cv_list: number[];
+  // usage
   cv_usage: number;
   cv_limit: number;
   nvites_usage: number;
@@ -38,6 +44,101 @@ interface AlertTeam {
   overage_amount: number;
   members: Member[];
   message: string;
+  financial_year: string;
+}
+
+// =====================================================
+// HELPERS FOR NEW MESSAGE FORMAT
+// =====================================================
+
+function getFirstName(fullName: string): string {
+  if (!fullName) return "";
+  return fullName.trim().split(/\s+/)[0];
+}
+
+function formatFYDuration(financialYear: string): string {
+  const match = financialYear.match(/(\d{4})-(\d{4})/);
+  if (!match) return financialYear;
+  return `1st April ${match[1]}-31st March ${match[2]}`;
+}
+
+function getFYEndDate(financialYear: string): string {
+  const match = financialYear.match(/\d{4}-(\d{4})/);
+  return match ? `31st March ${match[1]}` : "31st March";
+}
+
+// =====================================================
+// SHARED MESSAGE BUILDER (same format for WA & email)
+// =====================================================
+
+function buildUsageMessage(a: AlertTeam): string {
+  const firstName = getFirstName(a.partner_name || a.team_name);
+  const duration = formatFYDuration(a.financial_year || "");
+  const endDate = getFYEndDate(a.financial_year || "");
+
+  const licences = a.licence_count || 1;
+  const cvBase = a.cv_limit_base || 0;
+  const topupList: number[] = a.topup_cv_list || [];
+  const topupTotal = a.topup_cv_total || 0;
+  const baseTotal = cvBase * licences;
+  const totalPurchase = baseTotal + topupTotal;
+  const totalCvUsage = a.cv_usage;
+  const overUse = Math.max(0, totalCvUsage - totalPurchase);
+  const finalCost = overUse * 10;
+
+  const hasMembers = a.members && a.members.length > 0;
+
+  const lines: string[] = [
+    `Dear ${firstName}`,
+    `Kindly Note the CV Access Usage for the Below Mentioned ID/ID's Under you Partnership.`,
+    `Duration: ${duration}`,
+  ];
+
+  if (hasMembers) {
+    for (const m of a.members) {
+      lines.push(`Username: ${m.email}`);
+      lines.push(`Usage: ${(m.cv_usage ?? 0).toLocaleString("en-IN")}`);
+    }
+    lines.push(`Total Usage: ${totalCvUsage.toLocaleString("en-IN")}`);
+  } else {
+    lines.push(`Username: ${a.partner_email || ""}`);
+    lines.push(`Usage: ${totalCvUsage.toLocaleString("en-IN")}`);
+  }
+
+  // Initial Purchase
+  if (licences > 1) {
+    lines.push(`Initial Purchase: ${cvBase} x ${licences} = Rs ${baseTotal.toLocaleString("en-IN")}`);
+  } else {
+    lines.push(`Initial Purchase: ${cvBase}`);
+  }
+
+  // Extra Purchase
+  if (topupList.length > 1) {
+    lines.push(`Extra Purchase: ${topupList.join("+")}= ${topupTotal.toLocaleString("en-IN")}`);
+  } else if (topupList.length === 1) {
+    lines.push(`Extra Purchase: ${topupList[0]}`);
+  } else {
+    lines.push(`Extra Purchase: `);
+  }
+
+  // Total Purchase
+  lines.push(`Total Purchase: ${totalPurchase.toLocaleString("en-IN")}`);
+
+  // Over Use + Cost (only if overuse exists)
+  if (overUse > 0) {
+    lines.push(`Over Use: ${overUse.toLocaleString("en-IN")}`);
+    lines.push(`Final Cost of Over Usage Until ${endDate}: Rs ${finalCost.toLocaleString("en-IN")}+ GST. `);
+  }
+
+  lines.push(
+    `Kindly confirm the same so that the invoice can be issued from our end. `,
+    `Please note that the above can be verified in the report section of your Naukri Account. `,
+    `Regards `,
+    `Kajal Khamkar`,
+    `Executive Assistant`,
+  );
+
+  return lines.join("\n");
 }
 
 // =====================================================
@@ -45,91 +146,11 @@ interface AlertTeam {
 // =====================================================
 
 function buildWhatsAppMessage(a: AlertTeam): string {
-  const pct = (u: number, l: number) =>
-    l > 0 ? Math.round((u / l) * 100) : 0;
-
-  const statusLine =
-    a.type === "exceeded"
-      ? "🔴 *LIMIT EXCEEDED*"
-      : a.type === "critical"
-      ? "🟠 *CRITICAL — Approaching Limit*"
-      : "🟡 *WARNING — High Usage*";
-
-  const memberLines = (a.members || [])
-    .map(
-      (m) =>
-        `  • ${m.name || m.email} (${m.email})\n` +
-        `    CV: ${(m.cv_usage ?? 0).toLocaleString("en-IN")} | NVites: ${m.nvites_usage.toLocaleString("en-IN")} | Jobs: ${m.jobs_usage}`
-    )
-    .join("\n");
-
-  const overageLine =
-    a.overage_amount > 0
-      ? `\n⚠️ *Overage Amount Due (incl. GST): ₹${a.overage_amount.toLocaleString("en-IN")}*\nKindly clear this at the earliest.\n`
-      : "";
-
-  return (
-    `Dear ${a.partner_name || a.team_name},\n\n` +
-    `${statusLine}\n\n` +
-    `We hope this message finds you well. This is a usage alert from *Talent Corner HR Services* regarding your Naukri.com account.\n\n` +
-    `📊 *Usage Summary*\n` +
-    `• CV Access    : ${a.cv_usage.toLocaleString("en-IN")} / ${a.cv_limit.toLocaleString("en-IN")} (${pct(a.cv_usage, a.cv_limit)}%) — Remaining: ${a.cv_remaining.toLocaleString("en-IN")}\n` +
-    `• NVites       : ${a.nvites_usage.toLocaleString("en-IN")} / ${a.nvites_limit.toLocaleString("en-IN")} (${pct(a.nvites_usage, a.nvites_limit)}%) — Remaining: ${a.nvites_remaining.toLocaleString("en-IN")}\n` +
-    `• Job Postings : ${a.jobs_usage} / ${a.jobs_limit} (${pct(a.jobs_usage, a.jobs_limit)}%) — Remaining: ${a.jobs_remaining}\n\n` +
-    `👥 *Member-wise Breakdown*\n${memberLines}\n` +
-    `${overageLine}\n` +
-    `We request you to kindly review your usage and plan accordingly. Should you wish to purchase additional inventory, please reach out to us.\n\n` +
-    `Thank you for your continued partnership.\n\n` +
-    `Warm regards,\n` +
-    `Operations Team\n` +
-    `Talent Corner HR Services Pvt. Ltd.`
-  );
+  return buildUsageMessage(a);
 }
 
 function buildEmailBody(a: AlertTeam): string {
-  const pct = (u: number, l: number) =>
-    l > 0 ? Math.round((u / l) * 100) : 0;
-
-  const memberRows = (a.members || [])
-    .map(
-      (m) =>
-        `  - ${m.name || m.email} (${m.email})\n` +
-        `    CV: ${(m.cv_usage ?? 0).toLocaleString("en-IN")} | NVites: ${m.nvites_usage.toLocaleString("en-IN")} | Jobs: ${m.jobs_usage}`
-    )
-    .join("\n");
-
-  const statusLine =
-    a.type === "exceeded"
-      ? "LIMIT EXCEEDED"
-      : a.type === "critical"
-      ? "CRITICAL - Approaching Limit"
-      : "WARNING - High Usage";
-
-  const overageLine =
-    a.overage_amount > 0
-      ? `\nOVERAGE AMOUNT DUE (incl. GST): Rs. ${a.overage_amount.toLocaleString("en-IN")}\nKindly arrange payment at the earliest.\n`
-      : "";
-
-  return (
-    `Dear ${a.partner_name || a.team_name},\n\n` +
-    `We hope this message finds you well.\n\n` +
-    `This is an automated usage alert from Talent Corner HR Services regarding your Naukri.com account.\n\n` +
-    `STATUS: ${statusLine}\n\n` +
-    `USAGE SUMMARY\n` +
-    `${'='.repeat(50)}\n` +
-    `CV Access    : ${a.cv_usage.toLocaleString("en-IN").padStart(8)} used / ${a.cv_limit.toLocaleString("en-IN").padStart(8)} allocated  (${pct(a.cv_usage, a.cv_limit)}%)  | Remaining: ${a.cv_remaining.toLocaleString("en-IN")}\n` +
-    `NVites       : ${a.nvites_usage.toLocaleString("en-IN").padStart(8)} used / ${a.nvites_limit.toLocaleString("en-IN").padStart(8)} allocated  (${pct(a.nvites_usage, a.nvites_limit)}%)  | Remaining: ${a.nvites_remaining.toLocaleString("en-IN")}\n` +
-    `Job Postings : ${String(a.jobs_usage).padStart(8)} used / ${String(a.jobs_limit).padStart(8)} allocated  (${pct(a.jobs_usage, a.jobs_limit)}%)  | Remaining: ${a.jobs_remaining}\n\n` +
-    `MEMBER-WISE BREAKDOWN\n` +
-    `${'='.repeat(50)}\n` +
-    `${memberRows}\n` +
-    `${overageLine}\n` +
-    `We request you to review your usage at the earliest and plan accordingly. Should you wish to purchase additional inventory or discuss your account, please do not hesitate to contact us.\n\n` +
-    `Thank you for your continued partnership.\n\n` +
-    `Warm regards,\n` +
-    `Operations Team\n` +
-    `Talent Corner HR Services Pvt. Ltd.`
-  );
+  return buildUsageMessage(a);
 }
 
 // =====================================================

@@ -140,3 +140,10 @@ class Invoice(Base):
         Text,
         nullable=True
     )
+
+    # Snapshot of partner contact details at invoice-generation time
+    # Stored as JSON: {"address": ..., "phone": ..., "gstin": ..., "state_code": ..., "email": ...}
+    partner_details = Column(
+        Text,
+        nullable=True
+    )

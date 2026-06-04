@@ -1,7 +1,14 @@
 // Single source of truth for the API base URL.
-// In development: import.meta.env.VITE_API_URL
-// In production: the VITE_API_URL env variable (set in .env.production)
-const API = import.meta.env.VITE_API_URL || "import.meta.env.VITE_API_URL";
+// In development: set via .env.local → VITE_API_URL=http://localhost:8000
+// In production:  set via .env.production → VITE_API_URL=https://saarthinazar-backend.onrender.com
+const API = import.meta.env.VITE_API_URL as string;
+
+if (!API) {
+  console.error(
+    "[api.ts] VITE_API_URL is not set. " +
+    "Create frontend/.env.local with VITE_API_URL=http://localhost:8000 for local dev."
+  );
+}
 
 export default API;
 

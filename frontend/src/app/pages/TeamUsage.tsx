@@ -1,11 +1,36 @@
 import React, { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, AlertCircle, UserPlus, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useFY } from "../context/FYContext";
 
 import API from "../services/api";
 
 const _API = API;
+
+// ──────────────────────────────────────────────
+// Decode JWT role (no library needed)
+// ──────────────────────────────────────────────
+function getUserRole(): string {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return "";
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return (payload.role || "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function getUsername(): string {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return "Kajal";
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.username || "Kajal";
+  } catch {
+    return "Kajal";
+  }
+}
 
 interface SubUser {
   id: number;
@@ -54,6 +79,11 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+interface AddMemberModal {
+  teamId: number;
+  teamName: string;
+}
+
 export default function TeamUsage() {
   const navigate = useNavigate();
   const { financialYear, setFinancialYear, financialYears } = useFY();
@@ -62,6 +92,17 @@ export default function TeamUsage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
+
+  // Add Member modal state
+  const [addMemberModal, setAddMemberModal] = useState<AddMemberModal | null>(null);
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberEmail, setNewMemberEmail] = useState("");
+  const [addMemberLoading, setAddMemberLoading] = useState(false);
+  const [addMemberError, setAddMemberError] = useState("");
+
+  const userRole = getUserRole();
+  const username = getUsername();
+  const canAddMembers = ["operations", "admin", "owner"].includes(userRole);
 
   // ===================================================
   // FETCH TEAMS scoped to selected financial year
@@ -96,6 +137,47 @@ export default function TeamUsage() {
   };
 
   // ===================================================
+  // ADD MEMBER HANDLER
+  // ===================================================
+
+  const handleAddMember = async () => {
+    if (!addMemberModal) return;
+    if (!newMemberEmail.trim() || !newMemberEmail.includes("@")) {
+      setAddMemberError("Please enter a valid email address.");
+      return;
+    }
+    setAddMemberLoading(true);
+    setAddMemberError("");
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API}/reports/teams/${addMemberModal.teamId}/members`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newMemberName.trim(),
+          email: newMemberEmail.trim().toLowerCase(),
+          financial_year: financialYear,
+          added_by: username,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to add member");
+      // Refresh teams and close modal
+      await fetchTeams();
+      setAddMemberModal(null);
+      setNewMemberName("");
+      setNewMemberEmail("");
+    } catch (err: any) {
+      setAddMemberError(err.message || "Something went wrong");
+    } finally {
+      setAddMemberLoading(false);
+    }
+  };
+
+  // ===================================================
   // LOADING
   // ===================================================
 
@@ -120,6 +202,7 @@ export default function TeamUsage() {
   }
 
   return (
+    <>
     <div className="p-8">
 
       {/* ======================================= */}
@@ -283,6 +366,19 @@ export default function TeamUsage() {
                                 <AlertCircle className="w-4 h-4 text-purple-600" />
                                 Team Members ({team.subusers.length})
                               </h4>
+                              {canAddMembers && (
+                                <button
+                                  onClick={() => {
+                                    setAddMemberModal({ teamId: team.id, teamName: team.name });
+                                    setNewMemberName("");
+                                    setNewMemberEmail("");
+                                    setAddMemberError("");
+                                  }}
+                                  className="mb-3 flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-xs font-medium transition"
+                                >
+                                  <UserPlus className="w-3.5 h-3.5" /> Add Member
+                                </button>
+                              )}
                               <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                                 <table className="w-full">
                                   <thead className="bg-slate-50 border-b border-slate-200">
@@ -320,5 +416,65 @@ export default function TeamUsage() {
         </div>
       )}
     </div>
+
+      {/* ADD MEMBER MODAL */}
+      {addMemberModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl">
+            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-medium">Add Team Member</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{addMemberModal.teamName} · FY {financialYear}</p>
+              </div>
+              <button onClick={() => setAddMemberModal(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {addMemberError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                  {addMemberError}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  placeholder="e.g. Priya Sharma"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email Address <span className="text-red-500">*</span></label>
+                <input
+                  type="email"
+                  value={newMemberEmail}
+                  onChange={(e) => setNewMemberEmail(e.target.value)}
+                  placeholder="e.g. priya.sharma@company.in"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleAddMember}
+                  disabled={addMemberLoading}
+                  className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {addMemberLoading ? "Adding..." : "Add Member"}
+                </button>
+                <button
+                  onClick={() => setAddMemberModal(null)}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

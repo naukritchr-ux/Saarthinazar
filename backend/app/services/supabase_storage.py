@@ -43,54 +43,27 @@ def _get_client():
         return _client
 
     if not _SUPABASE_AVAILABLE:
-
-        print(
-            "[supabase_storage] ❌ supabase package not installed"
-        )
-
+        print("[supabase_storage] ❌ supabase package not installed")
         return None
 
     url = os.getenv("SUPABASE_URL", "").strip()
-
-    key = os.getenv(
-        "SUPABASE_SERVICE_ROLE_KEY",
-        ""
-    ).strip()
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
     print("SUPABASE URL FOUND:", bool(url))
     print("SUPABASE KEY FOUND:", bool(key))
     print("SUPABASE PACKAGE AVAILABLE:", _SUPABASE_AVAILABLE)
 
-    # Ignore placeholder values
-
-    if (
-        not url
-        or not key
-        or key == "your_service_role_key_here"
-    ):
-
-        print(
-            "[supabase_storage] ❌ Missing Supabase configuration"
-        )
-
+    if not url or not key or key == "your_service_role_key_here":
+        print("[supabase_storage] ❌ Missing Supabase configuration")
         return None
 
     try:
-
         _client = create_client(url, key)
-
-        print(
-            "[supabase_storage] ✅ Client initialized"
-        )
-
+        print("[supabase_storage] ✅ Client initialized")
         return _client
 
     except Exception as exc:
-
-        print(
-            f"[supabase_storage] ❌ Could not create client: {exc}"
-        )
-
+        print(f"[supabase_storage] ❌ Could not create client: {exc}")
         return None
 
 
@@ -98,116 +71,59 @@ def _get_client():
 # PUBLIC API
 # =====================================================
 
-def upload_invoice_pdf(
-    local_path: str,
-    filename: str,
-) -> str | None:
+def upload_invoice_pdf(local_path: str, filename: str) -> str | None:
     """
-    Upload invoice PDF to Supabase Storage
-    and return public URL.
+    Upload invoice PDF to Supabase Storage and return public URL.
+
+    IMPORTANT: The local file is only deleted AFTER a confirmed
+    successful upload. If upload fails, the local file is kept
+    so the download route can still serve it.
     """
 
     client = _get_client()
 
     if client is None:
-
-        print(
-            "[supabase_storage] ❌ Supabase client NOT configured"
-        )
-
+        print("[supabase_storage] ❌ Supabase client NOT configured")
         return None
 
-    # =====================================================
-    # VALIDATE FILE
-    # =====================================================
-
     if not os.path.exists(local_path):
-
-        raise FileNotFoundError(
-            f"PDF file not found: {local_path}"
-        )
-
-    # =====================================================
-    # READ FILE
-    # =====================================================
+        raise FileNotFoundError(f"PDF file not found: {local_path}")
 
     with open(local_path, "rb") as f:
-
         data = f.read()
 
-    content_type = (
-        mimetypes.guess_type(filename)[0]
-        or "application/pdf"
-    )
-
-    # =====================================================
-    # UPLOAD TO SUPABASE STORAGE
-    # =====================================================
+    content_type = mimetypes.guess_type(filename)[0] or "application/pdf"
 
     try:
-
         client.storage.from_(BUCKET).upload(
-
             path=filename,
-
             file=data,
-
             file_options={
                 "content-type": content_type,
                 "upsert": "true",
             },
         )
 
-        # =====================================================
-        # BUILD PUBLIC URL
-        # =====================================================
-
-        supabase_url = os.getenv(
-            "SUPABASE_URL",
-            ""
-        ).rstrip("/")
-
+        supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
         public_url = (
-            f"{supabase_url}"
-            f"/storage/v1/object/public/"
-            f"{BUCKET}/{filename}"
+            f"{supabase_url}/storage/v1/object/public/{BUCKET}/{filename}"
         )
 
-        print(
-            "✅ Uploaded to Supabase:",
-            public_url
-        )
+        print("✅ Uploaded to Supabase:", public_url)
 
-        # =====================================================
-        # DELETE LOCAL TEMP FILE
-        # =====================================================
-
+        # ── Only delete local file AFTER confirmed upload ──────────
         try:
-
             if os.path.exists(local_path):
-
                 os.remove(local_path)
-
-                print(
-                    "🗑️ Deleted local temp PDF:",
-                    local_path
-                )
-
+                print("🗑️ Deleted local temp PDF:", local_path)
         except Exception as exc:
-
-            print(
-                "⚠️ Could not delete local PDF:",
-                str(exc)
-            )
+            print("⚠️ Could not delete local PDF:", str(exc))
 
         return public_url
 
     except Exception as exc:
-
-        print(
-            f"[supabase_storage] ❌ Upload failed: {exc}"
-        )
-
+        print(f"[supabase_storage] ❌ Upload failed — local file kept: {exc}")
+        # Return None so caller falls back to local path
         return None
 
 
@@ -216,9 +132,5 @@ def upload_invoice_pdf(
 # =====================================================
 
 def is_configured() -> bool:
-    """
-    Return True if Supabase storage
-    is properly configured.
-    """
-
+    """Return True if Supabase storage is properly configured."""
     return _get_client() is not None

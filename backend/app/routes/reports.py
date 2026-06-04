@@ -1,5 +1,6 @@
 import re
 import shutil
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -12,6 +13,7 @@ from fastapi import (
     UploadFile,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db
 from app.models.pricing import PricingPlan
@@ -28,6 +30,79 @@ from app.services.report_processor import ReportProcessor
 router = APIRouter(prefix="/reports")
 
 UPLOAD_DIR = Path("uploaded_reports")
+
+
+# ---------------------------------------------------------------------------
+# ADD TEAM MEMBER MANUALLY
+# ---------------------------------------------------------------------------
+
+@router.post("/teams/{team_id}/members")
+def add_team_member(
+    team_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """Manually add a sub-user (0 usage) to a team for a given financial year."""
+    from fastapi import Header
+    from app.models.team import Team
+    from app.services.naukri_rules import add_audit
+
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    name = str(payload.get("name", "")).strip()
+    email = str(payload.get("email", "")).strip().lower()
+    financial_year = str(payload.get("financial_year", "2025-2026")).strip()
+    added_by = str(payload.get("added_by", "Kajal")).strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email is required")
+
+    existing = (
+        db.query(SubUserUsage)
+        .filter(
+            SubUserUsage.team_id == team_id,
+            SubUserUsage.email == email,
+            SubUserUsage.financial_year == financial_year,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Member already exists in this team for this financial year")
+
+    new_member = SubUserUsage(
+        financial_year=financial_year,
+        team_id=team_id,
+        team_name=team.name,
+        name=name or email,
+        email=email,
+        cv_usage=0,
+        nvites_usage=0,
+        jobs_usage=0,
+    )
+    db.add(new_member)
+
+    add_audit(
+        db,
+        added_by,
+        "add_member_manual",
+        "team",
+        str(team_id),
+        {"email": email, "name": name, "financial_year": financial_year},
+    )
+
+    db.commit()
+    db.refresh(new_member)
+
+    return {
+        "status": "success",
+        "id": new_member.id,
+        "email": new_member.email,
+        "name": new_member.name,
+        "team_id": team_id,
+        "team_name": team.name,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +187,41 @@ def upload_reports(
             status_code=400,
             detail="Please upload both reports together.",
         )
+
+    # =========================================================================
+    # WEEKLY UPLOAD LOCK
+    # One successful upload per calendar week (Mon–Sun) per financial year.
+    # Uploading on any day (not just Monday) still consumes the weekly slot.
+    # =========================================================================
+
+    if not overwrite_existing:
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())   # Monday
+        week_end   = week_start + timedelta(days=6)            # Sunday
+        next_monday = week_start + timedelta(days=7)
+
+        existing_this_week = (
+            db.query(ReportUpload)
+            .filter(
+                ReportUpload.financial_year == financial_year,
+                ReportUpload.status == "success",
+                func.date(ReportUpload.created_at) >= week_start,
+                func.date(ReportUpload.created_at) <= week_end,
+            )
+            .first()
+        )
+
+        if existing_this_week:
+            upload_day = existing_this_week.created_at.strftime("%A, %d %b %Y")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Upload already done this week (uploaded on {upload_day}). "
+                    f"Only one upload is allowed per week regardless of the day. "
+                    f"Next upload window opens on Monday, "
+                    f"{next_monday.strftime('%d %b %Y')}."
+                ),
+            )
 
     # =========================================================================
     # SAVE FILES
