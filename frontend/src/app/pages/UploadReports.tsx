@@ -5,7 +5,7 @@ import {
 } from "react";
 
 import API from "../services/api";
-
+import { useFY } from "../context/FYContext";
 import { useNavigate } from "react-router-dom";
 import { useRole } from "../context/RoleContext";
 
@@ -42,8 +42,8 @@ export default function UploadReports() {
 
   const navigate = useNavigate();
 
-  const [financialYear, setFinancialYear] =
-    useState("2025-2026");
+  // ── Financial Year: sourced from global FYContext so it stays in sync ──
+  const { financialYear, setFinancialYear, financialYears } = useFY();
 
   const [resdexFile, setResdexFile] =
     useState<File | null>(null);
@@ -330,9 +330,18 @@ export default function UploadReports() {
           onChange={(e) => setFinancialYear(e.target.value)}
           className="px-4 py-2 border border-slate-300 rounded-xl bg-white"
         >
-          <option value="2024-2025">FY 2024-2025</option>
-          <option value="2025-2026">FY 2025-2026</option>
-          <option value="2026-2027">FY 2026-2027</option>
+          {financialYears.length > 0
+            ? financialYears.map((fy) => (
+                <option key={fy.label} value={fy.label}>
+                  FY {fy.label}
+                </option>
+              ))
+            : [
+                <option key="2024-2025" value="2024-2025">FY 2024-2025</option>,
+                <option key="2025-2026" value="2025-2026">FY 2025-2026</option>,
+                <option key="2026-2027" value="2026-2027">FY 2026-2027</option>,
+              ]
+          }
         </select>
       </div>
 
