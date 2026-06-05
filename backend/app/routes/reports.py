@@ -394,8 +394,6 @@ def upload_reports(
                 db.query(PricingPlan)
                 .filter(
                     PricingPlan.financial_year == financial_year,
-                    PricingPlan.period == join_period,
-                    PricingPlan.partner_type == partner_type,
                     PricingPlan.is_locked == True,
                     PricingPlan.is_active == True,
                 )
@@ -403,16 +401,29 @@ def upload_reports(
             )
 
             if not pricing:
-
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"No locked pricing found for "
-                        f"{financial_year} / "
-                        f"{join_period} / "
-                        f"{partner_type}"
-                    ),
+                # Fallback: any active plan for this FY (unlocked)
+                pricing = (
+                    db.query(PricingPlan)
+                    .filter(
+                        PricingPlan.financial_year == financial_year,
+                        PricingPlan.is_active == True,
+                    )
+                    .first()
                 )
+
+            if not pricing:
+                # Last resort: most recent plan across all years
+                pricing = (
+                    db.query(PricingPlan)
+                    .order_by(PricingPlan.id.desc())
+                    .first()
+                )
+
+            # Use plan limits if found, else 0 (Rashesh can adjust later in Master Data)
+            cv_lim      = pricing.cv_limit      if pricing else 0
+            nvites_lim  = pricing.nvites_limit  if pricing else 0
+            jobs_lim    = pricing.jobs_limit    if pricing else 0
+            lfee        = pricing.licence_fee   if pricing else 0
 
             team = create_team_from_upload(
                 db=db,
@@ -422,13 +433,10 @@ def upload_reports(
                 licences=licences,
                 partner_type=partner_type,
                 join_period=join_period,
-                licence_fee=pricing.licence_fee,
-
-                # IMPORTANT FIX:
-                # DO NOT multiply again here
-                cv_limit=pricing.cv_limit,
-                nvites_limit=pricing.nvites_limit,
-                jobs_limit=pricing.jobs_limit,
+                licence_fee=lfee,
+                cv_limit=cv_lim,
+                nvites_limit=nvites_lim,
+                jobs_limit=jobs_lim,
             )
 
             db.flush()
