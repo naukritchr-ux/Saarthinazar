@@ -23,6 +23,7 @@ import {
   useState,
 } from "react";
 import { useFY } from "../context/FYContext";
+import API from "../services/api";
 
 export default function Layout() {
 
@@ -140,7 +141,7 @@ export default function Layout() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "import.meta.env.VITE_API_URL/auth/change-password",
+        `${API}/auth/change-password`,
         {
           method: "POST",
           headers: {
@@ -194,7 +195,7 @@ export default function Layout() {
   const handleDeleteProfilePicture = async () => {
     const token = localStorage.getItem("token");
     try {
-      await fetch("import.meta.env.VITE_API_URL/auth/delete-pfp", {
+      await fetch(`${API}/auth/delete-pfp`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

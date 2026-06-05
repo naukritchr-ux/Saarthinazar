@@ -77,6 +77,10 @@ export default function UploadReports() {
   const [notMondayWarning, setNotMondayWarning] =
     useState<string | null>(null);
 
+  // Weekly lock override state
+  const [weeklyLockPending, setWeeklyLockPending] =
+    useState(false);
+
   const resdexInputRef =
     useRef<HTMLInputElement | null>(null);
 
@@ -258,15 +262,26 @@ export default function UploadReports() {
 
         let detail: string = data.detail || data.message || "Upload failed.";
 
-        if (detail.includes("must start from") && detail.includes("Resdex")) {
-          detail = `Resdex report must start from 01 Apr. Please re-download from Naukri.`;
+        // Detect weekly lock error specifically
+        if (detail.includes("Upload already done this week") || detail.includes("Next upload window")) {
+          setWeeklyLockPending(true);
+          setValidationError(detail);
+        } else if (detail.includes("must start from") && detail.includes("Resdex")) {
+          setValidationError(
+            `Wrong financial year selected. This Resdex report starts from a different April. ` +
+            `Please select the correct financial year in the dropdown above, or re-download the report from Naukri for the selected year.`
+          );
         } else if (detail.includes("must start from") && detail.includes("Job Posting")) {
-          detail = `Job Posting report must start from 01 Apr. Please re-download from Naukri.`;
+          setValidationError(
+            `Wrong financial year selected. This Job Posting report starts from a different April. ` +
+            `Please select the correct financial year in the dropdown above, or re-download the report from Naukri.`
+          );
         } else if (detail.includes("date mismatch") || detail.includes("Date ranges") || detail.includes("date range")) {
-          detail = `Report date mismatch. Both reports must cover the same period from 01 Apr.`;
+          setValidationError(`Report date mismatch. Both reports must cover the same period from 01 Apr.`);
+        } else {
+          setValidationError(detail);
         }
 
-        setValidationError(detail);
         clearFiles();
       }
 
@@ -352,16 +367,20 @@ export default function UploadReports() {
       {/* ERROR / DUPLICATE CONFIRMATION */}
       {validationError && (
         <div className={`border rounded-xl p-4 mb-6 ${
-          duplicatePending
+          duplicatePending || weeklyLockPending
             ? "bg-amber-50 border-amber-300"
             : "bg-red-50 border-red-200"
         }`}>
           <div className="flex items-start gap-3">
-            <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${duplicatePending ? "text-amber-600" : "text-red-600"}`} />
+            <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+              duplicatePending || weeklyLockPending ? "text-amber-600" : "text-red-600"
+            }`} />
             <div className="flex-1">
-              <p className={duplicatePending ? "text-amber-900" : "text-red-900"}>
+              <p className={duplicatePending || weeklyLockPending ? "text-amber-900" : "text-red-900"}>
                 {validationError}
               </p>
+
+              {/* Duplicate overwrite buttons */}
               {duplicatePending && (
                 <div className="flex gap-3 mt-3">
                   <button
@@ -373,6 +392,25 @@ export default function UploadReports() {
                   </button>
                   <button
                     onClick={handleCancelOverwrite}
+                    className="px-4 py-2 bg-white border border-amber-300 text-amber-800 rounded-lg text-sm hover:bg-amber-50 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {/* Weekly lock override button */}
+              {weeklyLockPending && (
+                <div className="flex gap-3 mt-3">
+                  <button
+                    onClick={() => { setWeeklyLockPending(false); doUpload(true); }}
+                    disabled={uploading}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 transition disabled:opacity-50"
+                  >
+                    {uploading ? "Processing..." : "Upload Anyway (Override Weekly Lock)"}
+                  </button>
+                  <button
+                    onClick={() => { setWeeklyLockPending(false); setValidationError(null); }}
                     className="px-4 py-2 bg-white border border-amber-300 text-amber-800 rounded-lg text-sm hover:bg-amber-50 transition"
                   >
                     Cancel
