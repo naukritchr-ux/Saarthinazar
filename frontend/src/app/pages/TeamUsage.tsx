@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, AlertCircle, UserPlus, X } from "lucide-react";
+import React, { useEffect, useState, useMemo } from "react";
+import { ChevronDown, ChevronRight, ChevronUp, Plus, AlertCircle, UserPlus, X, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useFY } from "../context/FYContext";
 
@@ -93,6 +93,17 @@ export default function TeamUsage() {
   const [error, setError] = useState("");
   const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
 
+  // ─── Filter / Search / Sort state ────────────────────
+  const [statusFilter, setStatusFilter] = useState<"All" | "Critical" | "Warning" | "Safe">("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<string>("name");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const toggleSort = (field: string) => {
+    if (sortField === field) setSortAsc((a) => !a);
+    else { setSortField(field); setSortAsc(true); }
+  };
+
   // Add Member modal state
   const [addMemberModal, setAddMemberModal] = useState<AddMemberModal | null>(null);
   const [newMemberName, setNewMemberName] = useState("");
@@ -178,6 +189,52 @@ export default function TeamUsage() {
   };
 
   // ===================================================
+  // DERIVED: filtered + sorted teams
+  // ===================================================
+  const filteredTeams = useMemo(() => {
+    let result = [...teams];
+
+    // Status filter — "Critical" also catches "Over limit"
+    if (statusFilter !== "All") {
+      result = result.filter((t) =>
+        statusFilter === "Critical"
+          ? t.status === "Critical" || t.status === "Over limit"
+          : t.status === statusFilter
+      );
+    }
+
+    // Search by team name or partner name
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.partner_name ?? "").toLowerCase().includes(q)
+      );
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      let av: number | string;
+      let bv: number | string;
+      switch (sortField) {
+        case "cv_pct":   av = a.usage_percent.cv;    bv = b.usage_percent.cv;    break;
+        case "nvites_pct": av = a.usage_percent.nvites; bv = b.usage_percent.nvites; break;
+        case "jobs_pct": av = a.usage_percent.jobs;  bv = b.usage_percent.jobs;  break;
+        case "cv_bal":  av = a.total_limits.cv - a.usage.cv;    bv = b.total_limits.cv - b.usage.cv;   break;
+        case "outstanding": av = a.outstanding_invoice; bv = b.outstanding_invoice; break;
+        case "licences": av = a.licence_count; bv = b.licence_count; break;
+        default:        av = a.name.toLowerCase(); bv = b.name.toLowerCase();
+      }
+      if (av < bv) return sortAsc ? -1 : 1;
+      if (av > bv) return sortAsc ? 1 : -1;
+      return 0;
+    });
+
+    return result;
+  }, [teams, statusFilter, searchQuery, sortField, sortAsc]);
+
+  // ===================================================
   // LOADING
   // ===================================================
 
@@ -244,6 +301,53 @@ export default function TeamUsage() {
       </div>
 
       {/* ======================================= */}
+      {/* FILTER BAR */}
+      {/* ======================================= */}
+      <div className="flex flex-wrap gap-3 mb-6 items-center">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search team name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 pr-4 py-2 border border-slate-300 rounded-xl bg-white text-sm w-52 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          />
+        </div>
+
+        {/* Status Filter */}
+        <div className="flex items-center gap-1.5">
+          {(["All", "Critical", "Warning", "Safe"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                statusFilter === s
+                  ? s === "Critical"
+                    ? "bg-red-600 text-white border-red-600"
+                    : s === "Warning"
+                    ? "bg-orange-500 text-white border-orange-500"
+                    : s === "Safe"
+                    ? "bg-green-600 text-white border-green-600"
+                    : "bg-purple-600 text-white border-purple-600"
+                  : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Active filter summary */}
+        {(statusFilter !== "All" || searchQuery.trim()) && (
+          <span className="text-xs text-slate-500">
+            Showing {filteredTeams.length} of {teams.length} team{teams.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      {/* ======================================= */}
       {/* EMPTY STATE */}
       {/* ======================================= */}
 
@@ -268,19 +372,55 @@ export default function TeamUsage() {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="px-6 py-4 w-8" />
-                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Team</th>
+                  {/* Sortable: Team Name */}
+                  <th
+                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
+                    onClick={() => toggleSort("name")}
+                  >
+                    Team {sortField === "name" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Period / Type</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Licences</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">CV Usage</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">NVites Usage</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Jobs Usage</th>
+                  {/* Sortable: Licences */}
+                  <th
+                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
+                    onClick={() => toggleSort("licences")}
+                  >
+                    Licences {sortField === "licences" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
+                  </th>
+                  {/* Sortable: CV Usage % */}
+                  <th
+                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
+                    onClick={() => toggleSort("cv_pct")}
+                  >
+                    CV Usage {sortField === "cv_pct" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
+                  </th>
+                  {/* Sortable: NVites Usage % */}
+                  <th
+                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
+                    onClick={() => toggleSort("nvites_pct")}
+                  >
+                    NVites Usage {sortField === "nvites_pct" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
+                  </th>
+                  {/* Sortable: Jobs Usage % */}
+                  <th
+                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
+                    onClick={() => toggleSort("jobs_pct")}
+                  >
+                    Jobs Usage {sortField === "jobs_pct" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Outstanding</th>
+                  {/* Sortable: Outstanding Invoice */}
+                  <th
+                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
+                    onClick={() => toggleSort("outstanding")}
+                  >
+                    Outstanding {sortField === "outstanding" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {teams.map((team) => {
+                {filteredTeams.map((team) => {
                   const expanded = expandedTeams.has(team.id);
                   return (
                     <React.Fragment key={team.id}>

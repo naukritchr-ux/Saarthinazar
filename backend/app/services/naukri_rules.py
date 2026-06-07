@@ -42,7 +42,7 @@ DEFAULT_PRICING = [
     ("March", "All Partners", 0, 250, 2500, 20),
 ]
 
-# FIX 2: Staffing Pro now stores BASE limits (3000, 22500, 100) not pre-multiplied (6000, 45000, 200)
+# Staffing Pro stores BASE limits (3000, 22500, 100) — inventory engine multiplies by licences
 DEFAULT_TEAMS = [
     ("Talent Corner", "Gauri Naik", "gauri.naik@talentcorner.in", 1, "Early Renewal", "Q1 (Apr-Jun)", 80000, 56000, 3000, 22500, 100),
     ("HR Solutions", "Amit Kumar", "amit.kumar@hrsolutions.in", 1, "New Partner", "Q1 (Apr-Jun)", 80000, 58000, 3000, 22500, 100),
@@ -222,7 +222,6 @@ def normalize_team_name(name: str) -> str:
     )
 
 
-# FIX 1: Store BASE limits only — inventory engine multiplies by licences dynamically
 def create_team_from_upload(
     db,
     team_name: str,
@@ -235,6 +234,7 @@ def create_team_from_upload(
     cv_limit: int = 3000,
     nvites_limit: int = 22500,
     jobs_limit: int = 100,
+    financial_year: str = "",
 ):
     normalized = normalize_team_name(team_name)
 
@@ -243,17 +243,57 @@ def create_team_from_upload(
         if normalize_team_name(team.name) == normalized:
             return team
 
+    # ─── Look up limits from the pricing matrix ───────────────
+    # Only do this fallback lookup when the caller hasn't supplied
+    # real limits (all three are still at their zero defaults).
+    # If the caller (reports.py) already computed limits from the
+    # pricing matrix and passed them in, honour those values.
+    caller_provided_limits = (cv_limit != 0 or nvites_limit != 0 or jobs_limit != 0)
+    if financial_year and not caller_provided_limits:
+        plan = (
+            db.query(PricingPlan)
+            .filter(
+                PricingPlan.financial_year == financial_year,
+                PricingPlan.period == join_period,
+                PricingPlan.partner_type == partner_type,
+            )
+            .first()
+        )
+        if not plan:
+            # Relax to any plan for this FY + period
+            plan = (
+                db.query(PricingPlan)
+                .filter(
+                    PricingPlan.financial_year == financial_year,
+                    PricingPlan.period == join_period,
+                )
+                .first()
+            )
+        if not plan:
+            # Any plan for this FY
+            plan = (
+                db.query(PricingPlan)
+                .filter(PricingPlan.financial_year == financial_year)
+                .first()
+            )
+        if plan:
+            cv_limit     = (plan.cv_limit     or 0) * licences
+            nvites_limit = (plan.nvites_limit or 0) * licences
+            jobs_limit   = (plan.jobs_limit   or 0) * licences
+            licence_fee  = (plan.licence_fee  or 0) * licences
+    # ──────────────────────────────────────────────────────────
+
     try:
         new_team = Team(
             name=team_name.strip(),
             partner_name=partner_name or "",
             partner_email=partner_email or "",
+            financial_year=financial_year or "2025-2026",
             licences=licences,
             partner_type=partner_type,
             join_period=join_period,
             licence_fee=licence_fee,
             cost_share=0,
-            # FIXED: store BASE values only; inventory engine multiplies by licences dynamically
             cv_limit=cv_limit,
             nvites_limit=nvites_limit,
             jobs_limit=jobs_limit,
@@ -412,7 +452,7 @@ def team_payload(team: Team, db: Session, financial_year: str, include_financial
         "topups": topups,
         "total_limits": limits,
         "usage": usage,
-        "remaining": {key: limits[key] - usage[key] for key in INVENTORY_TYPES},
+        "remaining": {key: max(0, limits[key] - usage[key]) for key in INVENTORY_TYPES},
         "usage_percent": percentages,
         "status": status_for_percent(max(percentages.values())),
         "outstanding_invoice": outstanding_for_team(db, team.id),
@@ -469,29 +509,65 @@ def overage_items(team: Team, db: Session, financial_year: str) -> list[dict]:
     return items
 
 
-def next_invoice_number(db: Session) -> str:
-    return f"INV-2026-{db.query(Invoice).count() + 1:03d}"
+def next_invoice_number(db: Session, financial_year: str | None = None) -> str:
+    # Use the start-year from the FY label (e.g. "2025-2026" → "2025"),
+    # or fall back to the current calendar year.
+    if financial_year:
+        year_part = financial_year.split("-")[0]
+    else:
+        year_part = str(date.today().year)
+    count = db.query(Invoice).count() + 1
+    return f"INV-{year_part}-{count:03d}"
 
 
-def create_invoice(db: Session, team: Team, invoice_type: str, items: list[dict], actor: str = "system", notes: str = "") -> Invoice:
-    amount = sum(item["total"] for item in items)
+def create_invoice(
+    db: Session,
+    team: Team,
+    invoice_type: str,
+    items: list[dict],
+    actor: str = "system",
+    notes: str = "",
+    financial_year: str | None = None,
+) -> Invoice:
+    # Resolve financial_year: prefer explicit arg, then team's stored FY
+    fy = (
+        financial_year
+        or getattr(team, "financial_year", None)
+        or f"{date.today().year}-{date.today().year + 1}"
+    )
+    # Each item dict has keys: subtotal (pre-GST), gst (GST portion), total (incl. GST)
+    subtotal_amount = sum(float(item.get("subtotal") or item.get("amount") or 0) for item in items)
+    gst_amount      = sum(float(item.get("gst")      or 0)                        for item in items)
+    total_amount    = sum(float(item.get("total")    or item.get("amount") or 0)  for item in items)
+
+    # Fallback: if items don't carry GST/total breakdown, derive from subtotal
+    if total_amount == 0 and subtotal_amount > 0:
+        gst_amount   = round(subtotal_amount * 0.18, 2)
+        total_amount = round(subtotal_amount + gst_amount, 2)
+
     invoice = Invoice(
-        invoice_number=next_invoice_number(db),
-        financial_year="2025-2026",
+        invoice_number=next_invoice_number(db, fy),
+        financial_year=fy,
         team_id=team.id,
         partner_name=team.name,
         invoice_type=invoice_type,
         invoice_date=date.today(),
         due_date=date.today() + timedelta(days=14),
-        amount=amount,
+        amount=round(subtotal_amount, 2),   # pre-GST
+        gst_amount=round(gst_amount, 2),
+        total_amount=round(total_amount, 2),
         paid_amount=0,
         status="Unpaid",
+        payment_status="unpaid",
         notes=notes,
         items_json=json.dumps(items),
     )
     db.add(invoice)
     db.flush()
-    add_audit(db, actor, "create_invoice", "invoice", invoice.invoice_number, {"team": team.name, "amount": amount, "type": invoice_type})
+    add_audit(
+        db, actor, "create_invoice", "invoice", invoice.invoice_number,
+        {"team": team.name, "amount": total_amount, "type": invoice_type, "financial_year": fy}
+    )
     return invoice
 
 
@@ -515,26 +591,37 @@ def invoice_payload(invoice: Invoice) -> dict:
     }
 
 
+def _inv_total(invoice: Invoice) -> float:
+    """Use total_amount (incl. GST) if set, fall back to amount (pre-GST)."""
+    t = float(invoice.total_amount or 0)
+    a = float(invoice.amount or 0)
+    return t if t > 0 else a
+
+
 def invoice_summary(invoices: Iterable[Invoice]) -> dict:
     invoices = list(invoices)
     outstanding = sum(
-        max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
+        max(0, _inv_total(invoice) - (invoice.paid_amount or 0))
         for invoice in invoices
-        if invoice.status != "Paid"
+        if (invoice.payment_status or invoice.status or "").lower() != "paid"
     )
     paid = sum(invoice.paid_amount or 0 for invoice in invoices)
     partial_pending = sum(
-        max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
+        max(0, _inv_total(invoice) - (invoice.paid_amount or 0))
         for invoice in invoices
-        if invoice.status == "Partially paid"
+        if (invoice.payment_status or invoice.status or "").lower() in ("partial", "partially paid")
     )
     overdue = sum(
-        max(0, (invoice.amount or 0) - (invoice.paid_amount or 0))
+        max(0, _inv_total(invoice) - (invoice.paid_amount or 0))
         for invoice in invoices
         if (
-            invoice.status != "Paid"
+            (invoice.payment_status or invoice.status or "").lower() != "paid"
             and invoice.due_date
-            and invoice.due_date.date() < date.today()
+            and (
+                invoice.due_date.date()
+                if hasattr(invoice.due_date, "date")
+                else invoice.due_date
+            ) < date.today()
         )
     )
     return {
@@ -542,7 +629,10 @@ def invoice_summary(invoices: Iterable[Invoice]) -> dict:
         "paid": paid,
         "partial_pending": partial_pending,
         "overdue": overdue,
-        "pending_count": len([i for i in invoices if i.status != "Paid"]),
+        "pending_count": len([
+            i for i in invoices
+            if (i.payment_status or i.status or "").lower() != "paid"
+        ]),
     }
 
 
@@ -576,7 +666,6 @@ def alert_message(team: Team, db: Session, financial_year: str) -> dict:
         if overage_amount > 0 else ""
     )
 
-    # Formal email body
     email_body = (
         f"Dear {team.partner_name or team.name},\n\n"
         f"We hope this message finds you well.\n\n"
@@ -612,7 +701,6 @@ def alert_message(team: Team, db: Session, financial_year: str) -> dict:
         "overage_items": items,
         "overage_amount": overage_amount,
         "message": email_body,
-        # Flat fields expected by the alerts route
         "cv_usage": usage["cv"],
         "cv_limit": limits["cv"],
         "nvites_usage": usage["nvites"],
@@ -649,15 +737,11 @@ def parse_job_posting_report(filepath: str) -> tuple[tuple[date | None, date | N
 
     raw = pd.read_excel(filepath, header=None)
 
-    # Row 2, col 1 contains the date range string e.g. "01-Apr-25 To 31-Mar-26"
     date_range_text = str(raw.iloc[2, 1]).strip()
     print("JOB HEADER:", date_range_text)
     date_range = parse_date_range_from_text(date_range_text)
 
-    # Row 4 is the real header; data starts at row 5
-    # The sub-user column is named "Sub User" (col 0 = email)
     df = pd.read_excel(filepath, header=4)
-    # Rename the sub-user column — in some exports it appears as "Sub" or "Sub User"
     sub_col = next(
         (c for c in df.columns if str(c).strip().lower().startswith("sub")),
         df.columns[0],
@@ -665,10 +749,8 @@ def parse_job_posting_report(filepath: str) -> tuple[tuple[date | None, date | N
     df = df.rename(columns={sub_col: "email"})
     df["email"] = df["email"].astype(str).str.strip().str.lower()
 
-    # Drop summary/empty rows (no @ in email)
     df = df[df["email"].str.contains("@", na=False)]
 
-    # Total Job Expense is the last column or "Total Job Expense"
     job_col = next(
         (c for c in df.columns if "total" in str(c).lower() and "job" in str(c).lower()),
         df.columns[-1],
@@ -697,15 +779,12 @@ def parse_resdex_report(filepath: str) -> tuple[tuple[date | None, date | None],
 
     raw = pd.read_excel(filepath, engine="xlrd", header=None)
 
-    # Row 0, col 0 contains the full header string with duration
     header_text = str(raw.iloc[0, 0]).strip()
     print("RESDEX HEADER:", header_text)
     date_range = parse_date_range_from_text(header_text)
 
-    # Row 1 is the real header
     df = pd.read_excel(filepath, engine="xlrd", header=1)
 
-    # Subuser column: "Name | email@domain.com"
     sub_col = next(
         (c for c in df.columns if str(c).strip().lower() == "subuser"),
         df.columns[0],
@@ -719,15 +798,12 @@ def parse_resdex_report(filepath: str) -> tuple[tuple[date | None, date | None],
         .str.lower()
     )
 
-    # Drop rows where we couldn't parse an email
     df = df[df["email"].notna() & df["email"].str.contains("@", na=False)]
 
-    # NVites column
     nvites_col = next(
         (c for c in df.columns if str(c).strip().lower() == "nvites"),
         None,
     )
-    # CV Access By Company (A+B+C) is the total CV access column
     cv_col = next(
         (c for c in df.columns if "a+b+c" in str(c).lower() or "cv access by company" in str(c).lower()),
         None,

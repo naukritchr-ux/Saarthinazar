@@ -566,6 +566,65 @@ class ReportProcessor:
         return normalized_df
 
     # =====================================================
+    # NORMALIZE JOBS (with team name)
+    # =====================================================
+
+    def _normalize_jobs_with_team(
+        self,
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Like _normalize_jobs but also captures the team name column.
+        Used during the merge so SUSER team names serve as fallback
+        for subusers who appear only in the job posting report."""
+
+        df = self._normalize_columns(df)
+
+        email_col = self._find_column(
+            df, self.EMAIL_ALIASES, required=False
+        )
+        if not email_col:
+            email_col = self._find_column(df, ("subuser", "sub user"))
+
+        jobs_col = self._find_column(df, self.JOB_ALIASES)
+
+        team_col = self._find_column(
+            df, self.TEAM_ALIASES, required=False
+        )
+
+        normalized_df = pd.DataFrame({
+            "email": (
+                df[email_col]
+                .astype(str)
+                .str.extract(
+                    r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"
+                )[0]
+                .str.strip()
+                .str.lower()
+            ),
+            "jobs_usage": self._clean_numeric(df[jobs_col]),
+            "team_name": (
+                df[team_col].astype(str).str.strip()
+                if team_col else ""
+            ),
+        })
+
+        normalized_df = normalized_df[
+            normalized_df["email"].notna()
+        ]
+        normalized_df = normalized_df[
+            normalized_df["email"] != ""
+        ]
+
+        # Deduplicate by email
+        normalized_df = (
+            normalized_df
+            .groupby("email", as_index=False)
+            .agg({"jobs_usage": "sum", "team_name": "first"})
+        )
+
+        return normalized_df
+
+    # =====================================================
     # NORMALIZE JOBS
     # =====================================================
 
@@ -715,14 +774,27 @@ class ReportProcessor:
         )
 
         # ==========================================
-        # MERGE
+        # MERGE — primary key is subuser EMAIL
+        # Team names are intentionally NOT used as
+        # the join key because they differ between
+        # reports (trailing spaces, case, formatting).
+        # After merging by email, the Resdex team_name
+        # is preferred; SUSER team_name is used as
+        # fallback for rows that appear only in jobs.
         # ==========================================
+
+        # Bring SUSER team_name into job_df before merge
+        # so we can use it as fallback
+        job_df_full = self._normalize_jobs_with_team(
+            self._read_file(job_path)
+        )
 
         merged = pd.merge(
             resdex_df,
-            job_df,
+            job_df_full,
             on="email",
             how="outer",
+            suffixes=("_resdex", "_jobs"),
         ).fillna(0)
 
         merged["name"] = (
@@ -730,47 +802,67 @@ class ReportProcessor:
             .replace(0, "")
         )
 
+        # Prefer Resdex team name; fall back to SUSER team name
+        if "team_name_resdex" in merged.columns and "team_name_jobs" in merged.columns:
+            merged["team_name"] = merged.apply(
+                lambda r: r["team_name_resdex"]
+                if str(r["team_name_resdex"]).strip() not in ("", "0", "nan", "none")
+                else r["team_name_jobs"],
+                axis=1,
+            )
+            merged = merged.drop(columns=["team_name_resdex", "team_name_jobs"], errors="ignore")
+        elif "team_name" not in merged.columns:
+            merged["team_name"] = ""
+
         # ==========================================
-        # CLEAN TEAM NAMES HARDER
+        # CLEAN TEAM NAMES
         # ==========================================
 
         merged["team_name"] = (
-
             merged["team_name"]
-
             .fillna("")
-
             .astype(str)
-
-            .str.lower()
-
-            .str.replace(".", "", regex=False)
-
-            .str.replace(",", "", regex=False)
-
-            .str.replace("  ", " ", regex=False)
-
             .str.strip()
-
+            .str.replace(r"\s+", " ", regex=True)
             .replace("0", "")
-
             .replace("nan", "")
-
             .replace("none", "")
         )
 
         # ==========================================
-        # REMOVE EMPTY TEAM ROWS
+        # REMOVE EMPTY / STUB TEAM ROWS
         # ==========================================
 
+        # Remove rows with no team name at all + zero usage
         merged = merged[
-
             ~(
                 (merged["team_name"] == "")
                 &
                 (merged["cv_usage"] == 0)
                 &
                 (merged["nvites_usage"] == 0)
+            )
+        ]
+
+        # Remove known Naukri stub / inactive sub-accounts.
+        # These appear in the report as separate rows but are not real
+        # billable partners (e.g. "Avadai Inactive", "Surbhi Mr India").
+        STUB_SUFFIXES = ("inactive", "mr india", " in ")
+        def _is_stub(name: str) -> bool:
+            n = name.lower().strip()
+            return any(n.endswith(s) or s in n for s in STUB_SUFFIXES)
+
+        merged = merged[~merged["team_name"].apply(_is_stub)]
+
+        # Remove rows where ALL three usage columns are zero — these are
+        # sub-users who appear in the report header but did nothing this month.
+        merged = merged[
+            ~(
+                (merged["cv_usage"] == 0)
+                &
+                (merged["nvites_usage"] == 0)
+                &
+                (merged["jobs_usage"] == 0)
             )
         ]
 

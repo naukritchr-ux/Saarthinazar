@@ -33,6 +33,49 @@ UPLOAD_DIR = Path("uploaded_reports")
 
 
 # ---------------------------------------------------------------------------
+# ADMIN: fix teams whose financial_year column doesn't match their usage FY
+# Call once after upgrading to fix historical data.
+# ---------------------------------------------------------------------------
+
+@router.post("/fix-team-financial-years")
+def fix_team_financial_years(db: Session = Depends(get_db)):
+    """One-shot migration: update team.financial_year to match the FY of their
+    SubUserUsage records.  Safe to call multiple times — idempotent."""
+    from sqlalchemy import func as sqlfunc
+    from app.models.usage import SubUserUsage
+
+    # Find the dominant financial_year per team from usage records
+    usage_fy = (
+        db.query(
+            SubUserUsage.team_id,
+            SubUserUsage.financial_year,
+            sqlfunc.count(SubUserUsage.id).label("cnt"),
+        )
+        .group_by(SubUserUsage.team_id, SubUserUsage.financial_year)
+        .all()
+    )
+
+    # Pick the FY with the most usage rows per team
+    team_dominant_fy: dict[int, str] = {}
+    team_dominant_cnt: dict[int, int] = {}
+    for row in usage_fy:
+        if row.cnt > team_dominant_cnt.get(row.team_id, 0):
+            team_dominant_fy[row.team_id] = row.financial_year
+            team_dominant_cnt[row.team_id] = row.cnt
+
+    updated = []
+    for team_id, dominant_fy in team_dominant_fy.items():
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if team and getattr(team, "financial_year", None) != dominant_fy:
+            old_fy = team.financial_year
+            team.financial_year = dominant_fy
+            updated.append({"team": team.name, "old_fy": old_fy, "new_fy": dominant_fy})
+
+    db.commit()
+    return {"status": "success", "updated": updated, "count": len(updated)}
+
+
+# ---------------------------------------------------------------------------
 # ADD TEAM MEMBER MANUALLY
 # ---------------------------------------------------------------------------
 
@@ -379,6 +422,11 @@ def upload_reports(
 
         team = team_map.get(lookup_key)
 
+        # If found but financial_year doesn't match, update it so the team
+        # appears in the correct FY bucket for TopUps / MasterData
+        if team and getattr(team, "financial_year", None) != financial_year:
+            team.financial_year = financial_year
+
         # ---------------------------------------------------------------------
         # CREATE TEAM
         # ---------------------------------------------------------------------
@@ -437,6 +485,7 @@ def upload_reports(
                 cv_limit=cv_lim,
                 nvites_limit=nvites_lim,
                 jobs_limit=jobs_lim,
+                financial_year=financial_year,   # ← was missing; caused team.financial_year = "2025-2026"
             )
 
             db.flush()

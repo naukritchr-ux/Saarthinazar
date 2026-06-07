@@ -1,403 +1,112 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
-  FileText, Download, CheckCircle, Clock, AlertTriangle,
-  RefreshCw, DollarSign, X, Loader2, AlertCircle, Edit2, Save,
+  FileText, AlertCircle, Search, X, RefreshCw, Zap,
+  Download, Pencil, ChevronDown, ChevronUp, CheckCircle,
+  Building2, Users, IndianRupee, Clock, CircleCheck,
+  TriangleAlert, Banknote, BadgeCheck,
 } from "lucide-react";
 import { useFY } from "../context/FYContext";
 import API from "../services/api";
 
-const _API = API;
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface Invoice {
+interface InvSummary {
   id: number;
   invoice_number: string;
-  partner_name: string;
-  financial_year: string;
-  amount: number;
-  gst_amount: number;
-  total_amount: number;
-  paid_amount: number;
-  payment_status: "paid" | "partial" | "unpaid";
-  invoice_type: string;
-  invoice_date: string | null;
-  due_date: string | null;
-  payment_date: string | null;
   pdf_path: string | null;
-  notes: string;
-  partner_details: Record<string, string>;
+  payment_status: "unpaid" | "partial" | "paid";
+  paid_amount: number;
+  total_amount: number;
 }
 
-interface PreflightWarning {
+interface InvoiceRow {
+  type: string;
+  label: string;
+  subtotal: number;
+  gst: number;
+  total: number;
+  generated: boolean;
+  invoice: InvSummary | null;
+}
+
+interface TeamEntry {
   team_id: number;
   team_name: string;
+  partner_name: string;
+  partner_email: string;
+  address: string;
+  phone: string;
+  gstin: string;
+  state_code: string;
   missing_fields: string[];
+  invoice_rows: InvoiceRow[];
+  has_pending: boolean;
+  total_amount: number;
+  outstanding: number;
 }
 
-// ── helpers ───────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: string }) {
-  if (status === "paid")
-    return <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full"><CheckCircle className="w-3 h-3" /> Paid</span>;
-  if (status === "partial")
-    return <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-100 text-orange-700 text-xs font-medium rounded-full"><Clock className="w-3 h-3" /> Partial</span>;
-  return <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full"><AlertTriangle className="w-3 h-3" /> Unpaid</span>;
+function statusColor(s: string) {
+  if (s === "paid")    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  if (s === "partial") return "bg-amber-100 text-amber-700 border border-amber-200";
+  return "bg-rose-100 text-rose-700 border border-rose-200";
 }
 
-function isOverdue(d: string | null) {
-  if (!d) return false;
-  const dt = new Date(d);
-  return dt < new Date() && dt.toDateString() !== new Date().toDateString();
+function typeColor(t: string) {
+  if (t === "licence_fee") return "bg-sky-100 text-sky-700 border border-sky-200";
+  if (t === "overage")     return "bg-orange-100 text-orange-700 border border-orange-200";
+  if (t === "topup")       return "bg-violet-100 text-violet-700 border border-violet-200";
+  if (t === "combined")    return "bg-indigo-100 text-indigo-700 border border-indigo-200";
+  return "bg-slate-100 text-slate-600 border border-slate-200";
 }
 
-function fmtDate(d: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+function fmt(n: number) {
+  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
-function fmtINR(n: number) {
-  return "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 0 });
-}
+// ── Partial amount modal ──────────────────────────────────────────────────────
 
-// =====================================================
-// INVOICE DETAILS MODAL  (Kajal & Rashesh)
-// All inputs are inlined — NO sub-components defined
-// inside this function, which would cause React to
-// unmount/remount on every keystroke (focus loss bug).
-// =====================================================
-
-interface DetailsModalProps {
-  invoice: Invoice;
-  onClose: () => void;
-  onSaved: (updated: Partial<Invoice>) => void;
-}
-
-function InvoiceDetailsModal({ invoice, onClose, onSaved }: DetailsModalProps) {
-  const d = invoice.partner_details || {};
-
-  const [form, setForm] = useState({
-    partner_name:        invoice.partner_name  || "",
-    address:             d.address             || "",
-    city:                d.city                || "",
-    pincode:             d.pincode             || "",
-    gstin:               d.gstin               || "",
-    phone:               d.phone               || "",
-    email:               d.email               || "",
-    state_code:          d.state_code          || "",
-    candidate_name:      d.candidate_name      || "",
-    position:            d.position            || "",
-    annual_remuneration: d.annual_remuneration || "",
-    date_of_joining:     d.date_of_joining     || "",
-    due_date_detail:     d.due_date_detail     || "",
-  });
-
-  const [saving, setSaving] = useState(false);
-  const [error,  setError]  = useState("");
-  const [saved,  setSaved]  = useState(false);
-
-  const set = (key: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement>) =>
-      setForm((prev) => ({ ...prev, [key]: e.target.value }));
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    try {
-      const r = await fetch(`${API}/invoices/${invoice.id}/details`, {
-        method:  "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(form),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.detail || "Save failed");
-      setSaved(true);
-      onSaved({
-        partner_name:    data.partner_name,
-        partner_details: data.partner_details,
-        pdf_path:        data.pdf_path,
-      });
-      setTimeout(onClose, 900);
-    } catch (e: any) {
-      setError(e.message || "Something went wrong.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const inp = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-300 focus:outline-none";
-  const lbl = "block text-xs font-medium text-slate-600 mb-1";
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
-
-        {/* Header */}
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 flex-shrink-0">
-          <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center">
-            <Edit2 className="w-4 h-4 text-purple-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-base">Edit Invoice Details</h3>
-            <p className="text-slate-400 text-xs truncate">{invoice.invoice_number} · {invoice.partner_name}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 flex-shrink-0">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
-
-          {/* Bill To */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Bill To</p>
-            <div className="space-y-3">
-
-              <div>
-                <label className={lbl}>Partner / Company Name</label>
-                <input className={inp} type="text" placeholder="Team Aastha Kakkar"
-                  value={form.partner_name} onChange={set("partner_name")} />
-              </div>
-
-              <div>
-                <label className={lbl}>Address</label>
-                <input className={inp} type="text" placeholder="H.No: 103/8, Colonelganj"
-                  value={form.address} onChange={set("address")} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={lbl}>City</label>
-                  <input className={inp} type="text" placeholder="Kanpur"
-                    value={form.city} onChange={set("city")} />
-                </div>
-                <div>
-                  <label className={lbl}>PIN Code</label>
-                  <input className={inp} type="text" placeholder="208001"
-                    value={form.pincode} onChange={set("pincode")} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={lbl}>GSTIN / UIN</label>
-                  <input className={inp} type="text" placeholder="09XXXXX"
-                    value={form.gstin} onChange={set("gstin")} />
-                </div>
-                <div>
-                  <label className={lbl}>State Code</label>
-                  <input className={inp} type="text" placeholder="09"
-                    value={form.state_code} onChange={set("state_code")} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={lbl}>Phone</label>
-                  <input className={inp} type="text" placeholder="98XXXXXXXX"
-                    value={form.phone} onChange={set("phone")} />
-                </div>
-                <div>
-                  <label className={lbl}>Email</label>
-                  <input className={inp} type="email" placeholder="partner@example.com"
-                    value={form.email} onChange={set("email")} />
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* Placement Details */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Placement Details (optional)</p>
-            <div className="space-y-3">
-
-              <div>
-                <label className={lbl}>Candidate Name</label>
-                <input className={inp} type="text" placeholder="Full name"
-                  value={form.candidate_name} onChange={set("candidate_name")} />
-              </div>
-
-              <div>
-                <label className={lbl}>Position</label>
-                <input className={inp} type="text" placeholder="Job title"
-                  value={form.position} onChange={set("position")} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={lbl}>Annual Remuneration (₹)</label>
-                  <input className={inp} type="number" placeholder="0"
-                    value={form.annual_remuneration} onChange={set("annual_remuneration")} />
-                </div>
-                <div>
-                  <label className={lbl}>Date of Joining</label>
-                  <input className={inp} type="date"
-                    value={form.date_of_joining} onChange={set("date_of_joining")} />
-                </div>
-              </div>
-
-              <div>
-                <label className={lbl}>Due Date (for invoice)</label>
-                <input className={inp} type="date"
-                  value={form.due_date_detail} onChange={set("due_date_detail")} />
-              </div>
-
-            </div>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
-            Saving will immediately regenerate the PDF with these details. Amounts and GST are not affected.
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 flex-shrink-0">
-          {error && (
-            <p className="text-sm text-red-600 flex items-center gap-1 mb-3">
-              <AlertCircle className="w-4 h-4" /> {error}
-            </p>
-          )}
-          <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || saved}
-              className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-60 flex items-center justify-center gap-2 font-medium"
-            >
-              {saved
-                ? <><CheckCircle className="w-4 h-4" /> Saved!</>
-                : saving
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving & Regenerating PDF...</>
-                  : <><Save className="w-4 h-4" /> Save & Regenerate PDF</>}
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-// =====================================================
-// PREFLIGHT WARNING MODAL
-// =====================================================
-
-interface PreflightModalProps {
-  warnings: PreflightWarning[];
-  onProceed: () => void;
+function PartialModal({ inv, onConfirm, onCancel }: {
+  inv: InvSummary;
+  onConfirm: (n: number) => void;
   onCancel: () => void;
-}
-
-function PreflightModal({ warnings, onProceed, onCancel }: PreflightModalProps) {
+}) {
+  const [val, setVal] = useState(String(inv.paid_amount || ""));
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
-        <div className="flex items-start gap-3 p-5 border-b border-slate-200">
-          <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-            <AlertCircle className="w-5 h-5 text-amber-600" />
-          </div>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl border border-slate-200">
+        <div className="p-5 border-b border-slate-100 flex justify-between items-center">
           <div>
-            <h3 className="font-semibold text-base">Missing Details Before Invoice Generation</h3>
-            <p className="text-slate-500 text-sm mt-0.5">
-              The following partners are missing contact info that will appear on their invoice.
-            </p>
+            <h3 className="font-semibold text-slate-800">Partial Payment</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Enter amount received</p>
           </div>
-          <button onClick={onCancel} className="ml-auto text-slate-400 hover:text-slate-700 flex-shrink-0">
-            <X className="w-5 h-5" />
+          <button onClick={onCancel} className="p-1.5 rounded-lg hover:bg-slate-100 transition">
+            <X className="w-4 h-4 text-slate-400" />
           </button>
         </div>
-        <div className="p-5 space-y-3 max-h-72 overflow-y-auto">
-          {warnings.map((w) => (
-            <div key={w.team_id} className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-              <p className="font-medium text-sm text-slate-800">{w.team_name}</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Missing: <span className="text-amber-700 font-medium">{w.missing_fields.join(", ")}</span>
-              </p>
-            </div>
-          ))}
-        </div>
-        <div className="mx-5 mb-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
-          Use the <strong>Edit</strong> button on any invoice row to fill missing details after generation.
-        </div>
-        <div className="flex gap-3 px-5 pb-5">
-          <button onClick={onCancel} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
-            Cancel — Fill Details First
-          </button>
-          <button onClick={onProceed} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 font-medium">
-            Proceed Anyway
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =====================================================
-// PARTIAL PAYMENT MODAL
-// =====================================================
-
-interface PartialModalProps {
-  invoice: Invoice;
-  onClose: () => void;
-  onSave: (invoiceId: number, paidAmount: number) => Promise<void>;
-}
-
-function PartialPaymentModal({ invoice, onClose, onSave }: PartialModalProps) {
-  const [amount, setAmount] = useState(String(invoice.paid_amount || ""));
-  const [saving, setSaving] = useState(false);
-  const remaining = invoice.total_amount - Number(amount || 0);
-
-  const handleSave = async () => {
-    setSaving(true);
-    await onSave(invoice.id, Number(amount));
-    setSaving(false);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <h3 className="font-semibold text-lg">Partial Payment</h3>
-            <p className="text-slate-500 text-sm">{invoice.partner_name}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="space-y-3 mb-5">
-          <div className="flex justify-between text-sm text-slate-600">
-            <span>Total Invoice</span>
-            <span className="font-medium">{fmtINR(invoice.total_amount)}</span>
+        <div className="p-5 space-y-4">
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+            <p className="text-xs text-slate-500 mb-1">Invoice</p>
+            <p className="text-sm font-mono font-medium text-slate-800">{inv.invoice_number}</p>
+            <p className="text-xs text-slate-500 mt-1.5">Total: <span className="font-semibold text-slate-700">{fmt(inv.total_amount)}</span></p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Amount Received (₹)</label>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Amount Received (₹)</label>
             <input
-              type="number" value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-300 focus:outline-none"
-              min="0" max={invoice.total_amount} step="100"
+              type="number" min={0} max={inv.total_amount} autoFocus value={val}
+              onChange={e => setVal(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-400"
             />
           </div>
-          {Number(amount) > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">Balance remaining</span>
-              <span className={remaining > 0 ? "text-orange-600 font-medium" : "text-green-600 font-medium"}>
-                {fmtINR(remaining)}
-              </span>
-            </div>
-          )}
         </div>
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+        <div className="p-5 border-t border-slate-100 flex gap-3 justify-end">
+          <button onClick={onCancel} className="px-4 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 transition text-slate-600">Cancel</button>
           <button
-            onClick={handleSave}
-            disabled={saving || !amount || Number(amount) <= 0}
-            className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-60 flex items-center justify-center gap-2"
+            onClick={() => onConfirm(Number(val) || 0)}
+            className="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-semibold hover:bg-amber-600 transition"
           >
-            {saving ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</> : "Save Payment"}
+            Save Partial
           </button>
         </div>
       </div>
@@ -405,332 +114,726 @@ function PartialPaymentModal({ invoice, onClose, onSave }: PartialModalProps) {
   );
 }
 
-// =====================================================
-// MAIN PAGE
-// =====================================================
+// ── Status badge + fixed-position dropdown ────────────────────────────────────
+// Renders the dropdown in a FIXED position overlay — never clipped by
+// table overflow:hidden, scrollable containers, or card boundaries.
 
-export default function Invoices() {
-  const [filter, setFilter] = useState<"all" | "paid" | "unpaid" | "partial">("all");
-  const { financialYear, setFinancialYear, financialYears } = useFY();
-  const [invoices, setInvoices]               = useState<Invoice[]>([]);
-  const [loading, setLoading]                 = useState(true);
-  const [generating, setGenerating]           = useState(false);
-  const [generateMsg, setGenerateMsg]         = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [updatingId, setUpdatingId]           = useState<number | null>(null);
-  const [downloadingId, setDownloadingId]     = useState<number | null>(null);
-  const [partialModal, setPartialModal]       = useState<Invoice | null>(null);
-  const [preflightWarnings, setPreflightWarnings] = useState<PreflightWarning[] | null>(null);
-  const [detailsModal, setDetailsModal]       = useState<Invoice | null>(null);
+function StatusBadge({ inv, onUpdated }: {
+  inv: InvSummary;
+  onUpdated: (id: number, status: string, paid: number) => void;
+}) {
+  const [open, setOpen]               = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [showPartial, setShowPartial] = useState(false);
+  const [pos, setPos]                 = useState({ top: 0, left: 0 });
+  const btnRef                        = useRef<HTMLButtonElement>(null);
 
-  const fetchInvoices = async (fy = financialYear) => {
-    setLoading(true);
+  const openMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!btnRef.current) return;
+    const rect      = btnRef.current.getBoundingClientRect();
+    const menuH     = 120; // approx height of 3 items
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top = spaceBelow > menuH ? rect.bottom + 6 : rect.top - menuH - 6;
+    setPos({ top, left: rect.left });
+    setOpen(true);
+  };
+
+  const doUpdate = async (status: string, paid: number) => {
+    setSaving(true); setOpen(false);
     try {
-      const r = await fetch(`${API}/invoices?financial_year=${encodeURIComponent(fy)}`);
-      const data = await r.json();
-      setInvoices(Array.isArray(data) ? data : []);
-    } catch {
-      setInvoices([]);
-    } finally {
-      setLoading(false);
-    }
+      const res = await fetch(
+        `${API}/invoices/${inv.id}/payment?status=${status}&paid_amount=${paid}`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" } }
+      );
+      const data = await res.json();
+      if (data.status === "success") onUpdated(inv.id, data.payment_status, data.paid_amount);
+    } catch { /* silent */ } finally { setSaving(false); }
   };
 
-  useEffect(() => { fetchInvoices(financialYear); }, [financialYear]);
-
-  const filteredInvoices = useMemo(
-    () => filter === "all" ? invoices : invoices.filter((i) => i.payment_status === filter),
-    [invoices, filter]
-  );
-
-  const stats = useMemo(() => {
-    const outstanding = invoices.filter(i => i.payment_status !== "paid").reduce((s, i) => s + i.total_amount, 0);
-    const paid        = invoices.filter(i => i.payment_status === "paid").reduce((s, i) => s + i.total_amount, 0);
-    const partial     = invoices.filter(i => i.payment_status === "partial").reduce((s, i) => s + i.total_amount, 0);
-    const overdue     = invoices.filter(i => i.payment_status === "unpaid" && isOverdue(i.due_date)).reduce((s, i) => s + i.total_amount, 0);
-    return { outstanding, paid, partial, overdue };
-  }, [invoices]);
-
-  const runGenerate = async () => {
-    setPreflightWarnings(null);
-    setGenerating(true);
-    setGenerateMsg(null);
-    try {
-      const r = await fetch(`${API}/invoices/generate?financial_year=${encodeURIComponent(financialYear)}`, { method: "POST" });
-      const data = await r.json();
-      if (data.status === "success") {
-        const n = data.count ?? data.generated?.length ?? 0;
-        setGenerateMsg({ type: "success", text: n > 0 ? `${n} invoice${n !== 1 ? "s" : ""} generated successfully.` : "No new invoices to generate." });
-        fetchInvoices(financialYear);
-      } else {
-        setGenerateMsg({ type: "error", text: "Failed to generate invoices." });
-      }
-    } catch (e: any) {
-      setGenerateMsg({ type: "error", text: e.message || "Server error." });
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleGenerate = async () => {
-    setGenerateMsg(null);
-    try {
-      const r = await fetch(`${API}/invoices/preflight?financial_year=${encodeURIComponent(financialYear)}`);
-      const data = await r.json();
-      if ((data.warnings || []).length > 0) { setPreflightWarnings(data.warnings); return; }
-    } catch { /* proceed anyway */ }
-    runGenerate();
-  };
-
-  const updateStatus = async (invoiceId: number, status: "paid" | "partial" | "unpaid", paidAmount = 0) => {
-    setInvoices(prev => prev.map(inv =>
-      inv.id === invoiceId
-        ? { ...inv, payment_status: status, paid_amount: status === "paid" ? inv.total_amount : status === "unpaid" ? 0 : paidAmount, payment_date: status === "unpaid" ? null : new Date().toISOString() }
-        : inv
-    ));
-    setUpdatingId(invoiceId);
-    try {
-      const params = new URLSearchParams({ status, paid_amount: String(paidAmount) });
-      const r = await fetch(`${API}/invoices/${invoiceId}/payment?${params}`, { method: "PATCH" });
-      const data = await r.json();
-      if (data.status !== "success") fetchInvoices(financialYear);
-    } catch { fetchInvoices(financialYear); }
-    finally { setUpdatingId(null); }
-  };
-
-  const handleStatusChange = (invoice: Invoice, newStatus: string) => {
-    const s = newStatus as "paid" | "partial" | "unpaid";
-    if (s === "partial") setPartialModal(invoice);
-    else updateStatus(invoice.id, s);
-  };
-
-  const handleDownload = async (invoice: Invoice) => {
-    setDownloadingId(invoice.id);
-    try {
-      const r = await fetch(`${API}/invoices/${invoice.id}/download`);
-      if (!r.ok) { const err = await r.json().catch(() => ({})); alert(err.detail || "PDF not available."); return; }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `${invoice.invoice_number}.pdf`;
-      document.body.appendChild(a); a.click();
-      document.body.removeChild(a); URL.revokeObjectURL(url);
-    } catch { alert("Download failed. Please try again."); }
-    finally { setDownloadingId(null); }
-  };
-
-  const handleDetailsSaved = (updated: Partial<Invoice>) => {
-    setInvoices(prev => prev.map(inv =>
-      inv.id === detailsModal?.id ? { ...inv, ...updated } : inv
-    ));
+  const pick = (s: string) => {
+    setOpen(false);
+    if (s === "partial") { setShowPartial(true); return; }
+    doUpdate(s, s === "paid" ? inv.total_amount : 0);
   };
 
   return (
-    <div className="p-8">
+    <>
+      <button
+        ref={btnRef}
+        disabled={saving}
+        onClick={openMenu}
+        className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize flex items-center gap-1 transition
+          ${statusColor(inv.payment_status)} ${saving ? "opacity-50 cursor-wait" : "cursor-pointer hover:brightness-95"}`}
+      >
+        {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : null}
+        {inv.payment_status}
+        {!saving && <span className="opacity-40 text-[10px]">▾</span>}
+      </button>
 
-      {partialModal && (
-        <PartialPaymentModal
-          invoice={partialModal}
-          onClose={() => setPartialModal(null)}
-          onSave={async (id, amt) => { await updateStatus(id, "partial", amt); }}
-        />
-      )}
-      {preflightWarnings && (
-        <PreflightModal
-          warnings={preflightWarnings}
-          onCancel={() => setPreflightWarnings(null)}
-          onProceed={runGenerate}
-        />
-      )}
-      {detailsModal && (
-        <InvoiceDetailsModal
-          invoice={detailsModal}
-          onClose={() => setDetailsModal(null)}
-          onSaved={handleDetailsSaved}
-        />
-      )}
-
-      {/* HEADER */}
-      <div className="flex flex-wrap justify-between items-start gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl mb-2">Invoices & Payments</h1>
-          <p className="text-slate-600">Track billing and payment status for all franchise partners</p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <select
-            value={financialYear}
-            onChange={(e) => setFinancialYear(e.target.value)}
-            className="px-4 py-2 border border-slate-300 rounded-lg bg-white text-sm"
+      {/* Fixed-position dropdown — always visible over the screen */}
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[998]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-[999] w-36 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
+            style={{ top: pos.top, left: pos.left }}
           >
-            {financialYears.length > 0
-              ? financialYears.map((y) => <option key={y.id} value={y.label}>FY {y.label}</option>)
-              : <option value={financialYear}>FY {financialYear}</option>}
-          </select>
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2 text-sm disabled:opacity-60"
-          >
-            {generating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><FileText className="w-4 h-4" /> Generate Invoices</>}
-          </button>
-          <button onClick={() => fetchInvoices(financialYear)} className="p-2 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-500" title="Refresh">
-            <RefreshCw className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {generateMsg && (
-        <div className={`mb-6 flex items-start gap-3 p-4 rounded-xl border ${generateMsg.type === "success" ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-800"}`}>
-          {generateMsg.type === "success" ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <AlertTriangle className="w-5 h-5 flex-shrink-0" />}
-          <p className="text-sm">{generateMsg.text}</p>
-          <button onClick={() => setGenerateMsg(null)} className="ml-auto opacity-60 hover:opacity-100"><X className="w-4 h-4" /></button>
-        </div>
-      )}
-
-      {/* STAT CARDS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: "Outstanding",      value: stats.outstanding, color: "text-red-600",    sub: `${invoices.filter(i => i.payment_status !== "paid").length} invoices` },
-          { label: "Collected",        value: stats.paid,        color: "text-green-600",  sub: `${invoices.filter(i => i.payment_status === "paid").length} paid` },
-          { label: "Partial Payments", value: stats.partial,     color: "text-orange-600", sub: `${invoices.filter(i => i.payment_status === "partial").length} invoices` },
-          { label: "Overdue",          value: stats.overdue,     color: "text-red-700",    sub: `${invoices.filter(i => i.payment_status === "unpaid" && isOverdue(i.due_date)).length} overdue` },
-        ].map(({ label, value, color, sub }) => (
-          <div key={label} className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
-            <div className="flex items-center gap-2 mb-1">
-              <DollarSign className="w-4 h-4 text-slate-400" />
-              <p className="text-slate-600 text-sm">{label}</p>
-            </div>
-            <p className={`text-2xl font-semibold ${color}`}>{fmtINR(value)}</p>
-            <p className="text-xs text-slate-400 mt-1">{sub}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* TABLE */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 flex gap-2 flex-wrap">
-          {(["all", "unpaid", "partial", "paid"] as const).map((f) => {
-            const counts = { all: invoices.length, unpaid: invoices.filter(i => i.payment_status === "unpaid").length, partial: invoices.filter(i => i.payment_status === "partial").length, paid: invoices.filter(i => i.payment_status === "paid").length };
-            return (
-              <button key={f} onClick={() => setFilter(f)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${filter === f ? "bg-purple-100 text-purple-700" : "bg-slate-50 text-slate-500 hover:bg-slate-100"}`}>
-                {f.charAt(0).toUpperCase() + f.slice(1)} <span className="ml-1.5 text-xs opacity-70">({counts[f]})</span>
+            {(["unpaid", "partial", "paid"] as const).map(s => (
+              <button
+                key={s} onClick={() => pick(s)}
+                className={`w-full text-left px-3 py-2.5 text-xs font-medium hover:bg-slate-50 transition flex items-center gap-2
+                  ${inv.payment_status === s ? "opacity-40 pointer-events-none" : ""}`}
+              >
+                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColor(s)}`}>{s}</span>
               </button>
-            );
-          })}
+            ))}
+          </div>
+        </>
+      )}
+
+      {showPartial && (
+        <PartialModal
+          inv={inv}
+          onConfirm={amt => { setShowPartial(false); doUpdate("partial", amt); }}
+          onCancel={() => setShowPartial(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ── Edit contact modal ────────────────────────────────────────────────────────
+
+function EditContactModal({ team, onSaved, onClose }: {
+  team: TeamEntry;
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    partner_name:  team.partner_name,
+    partner_email: team.partner_email,
+    phone:         team.phone,
+    address:       team.address,
+    gstin:         team.gstin,
+    state_code:    team.state_code,
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const save = async () => {
+    setSaving(true); setErr("");
+    try {
+      const res = await fetch(`${API}/invoices/teams/${team.team_id}/contact`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (data.status === "success") { onSaved(); onClose(); }
+      else setErr(data.detail || "Failed to save");
+    } catch (e: any) { setErr(e.message || "Error"); }
+    finally { setSaving(false); }
+  };
+
+  const field = (label: string, key: keyof typeof form, placeholder = "") => (
+    <div>
+      <label className="text-xs font-semibold text-slate-600 block mb-1">{label}</label>
+      <input
+        value={form[key]}
+        onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
+        placeholder={placeholder}
+        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-400 bg-slate-50 focus:bg-white transition"
+      />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-200">
+        <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+          <div>
+            <h3 className="font-semibold text-slate-800">Edit Contact — <span className="text-violet-600">{team.team_name}</span></h3>
+            <p className="text-xs text-slate-500 mt-0.5">Details printed on invoice PDF</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 transition">
+            <X className="w-4 h-4 text-slate-400" />
+          </button>
+        </div>
+        <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
+          {field("Contact Name", "partner_name", "e.g. Rahul Sharma")}
+          {field("Email", "partner_email", "e.g. rahul@company.in")}
+          {field("Phone", "phone", "e.g. 9876543210")}
+          {field("GSTIN / UIN", "gstin", "e.g. 27AABCT1332L1ZT")}
+          {field("State Code", "state_code", "e.g. 27")}
+          {field("Address", "address", "Full billing address")}
+          {err && <p className="text-xs text-rose-600 bg-rose-50 px-3 py-2 rounded-lg border border-rose-200">{err}</p>}
+        </div>
+        <div className="p-5 border-t border-slate-100 flex gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 transition text-slate-600">Cancel</button>
+          <button
+            onClick={save} disabled={saving}
+            className="px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:bg-slate-300 flex items-center gap-2 transition"
+          >
+            {saving && <RefreshCw className="w-3 h-3 animate-spin" />} Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Team card ─────────────────────────────────────────────────────────────────
+
+function TeamCard({
+  team,
+  isOpen,
+  isGenerating,
+  generatingAll,
+  financialYear,
+  onToggle,
+  onGenerate,
+  onEdit,
+  onInvUpdated,
+}: {
+  team: TeamEntry;
+  isOpen: boolean;
+  isGenerating: boolean;
+  generatingAll: boolean;
+  financialYear: string;
+  onToggle: () => void;
+  onGenerate: () => void;
+  onEdit: () => void;
+  onInvUpdated: (teamId: number, invId: number, status: string, paid: number) => void;
+}) {
+  const pendingRows   = team.invoice_rows.filter(r => !r.generated);
+  const generatedRows = team.invoice_rows.filter(r => r.generated && r.invoice);
+  const hasMissing    = team.missing_fields.length > 0;
+  const allPaid       = generatedRows.length > 0 && generatedRows.every(r => r.invoice?.payment_status === "paid");
+
+  const accentClass = team.has_pending
+    ? "border-l-4 border-l-amber-400"
+    : team.outstanding > 0
+      ? "border-l-4 border-l-rose-400"
+      : allPaid
+        ? "border-l-4 border-l-emerald-400"
+        : "border-l-4 border-l-slate-200";
+
+  const cardBg = team.has_pending
+    ? "bg-amber-50/40"
+    : team.outstanding > 0
+      ? "bg-rose-50/20"
+      : "bg-white";
+
+  return (
+    <div className={`rounded-2xl border border-slate-200 shadow-sm overflow-hidden ${accentClass} ${cardBg} transition-all`}>
+
+      {/* ── Header row ── */}
+      <div
+        className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-white/70 transition"
+        onClick={onToggle}
+      >
+        <div className="text-slate-400 flex-shrink-0">
+          {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </div>
 
-        {loading ? (
-          <div className="flex justify-center py-16"><RefreshCw className="w-6 h-6 animate-spin text-purple-500" /></div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-200">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+          ${team.has_pending ? "bg-amber-100" : team.outstanding > 0 ? "bg-rose-100" : "bg-slate-100"}`}>
+          <Building2 className={`w-4 h-4 ${team.has_pending ? "text-amber-600" : team.outstanding > 0 ? "text-rose-500" : "text-slate-400"}`} />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-sm text-slate-800 truncate">{team.team_name}</p>
+          {team.partner_name && (
+            <p className="text-xs text-slate-500 truncate">{team.partner_name}</p>
+          )}
+        </div>
+
+        <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500">
+          <span className="px-2 py-0.5 bg-slate-100 rounded-full">
+            {team.invoice_rows.filter(r => r.generated).length} invoice{team.invoice_rows.filter(r => r.generated).length !== 1 ? "s" : ""}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {team.has_pending && (
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {pendingRows.length} pending
+            </span>
+          )}
+          {team.outstanding > 0 && (
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700 border border-rose-200">
+              {fmt(team.outstanding)} due
+            </span>
+          )}
+          {!team.has_pending && team.outstanding === 0 && generatedRows.length > 0 && (
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+              <CircleCheck className="w-3 h-3" /> Clear
+            </span>
+          )}
+          {team.invoice_rows.length === 0 && (
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+              No billables
+            </span>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={onEdit}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-white hover:border-slate-300 transition text-slate-600"
+          >
+            <Pencil className="w-3 h-3" /> Edit
+          </button>
+          {team.has_pending && (
+            <button
+              onClick={onGenerate}
+              disabled={isGenerating || generatingAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition
+                bg-violet-600 hover:bg-violet-700 text-white
+                disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed shadow-sm"
+            >
+              {isGenerating
+                ? <><RefreshCw className="w-3 h-3 animate-spin" /> Generating…</>
+                : <><Zap className="w-3 h-3" /> Generate</>
+              }
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Expanded detail ── */}
+      {isOpen && (
+        <div className="border-t border-slate-100">
+
+          {/* Missing fields banner */}
+          {hasMissing && (
+            <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2 text-xs text-amber-800">
+              <TriangleAlert className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" />
+              <span>Missing contact info for PDF: <strong>{team.missing_fields.join(", ")}</strong></span>
+              <button
+                onClick={onEdit}
+                className="ml-auto px-2.5 py-1 bg-amber-500 text-white rounded-lg text-xs font-semibold hover:bg-amber-600 transition"
+              >
+                Fill Details
+              </button>
+            </div>
+          )}
+
+          <div className="bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
-                  {["Invoice #", "Partner", "Amount (incl. GST)", "Due Date", "Status", "Payment Date", "Actions"].map((h) => (
-                    <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  {["Type", "Invoice #", "Amount", "Paid", "Outstanding", "Status", ""].map(h => (
+                    <th key={h} className={`px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide ${h === "" || h === "Invoice #" || h === "Type" || h === "Status" ? "text-left" : "text-right"}`}>
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredInvoices.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-12 text-slate-400 text-sm">
-                      {invoices.length === 0 ? `No invoices for FY ${financialYear}. Click "Generate Invoices" to create them.` : `No ${filter} invoices.`}
-                    </td>
-                  </tr>
-                )}
-                {filteredInvoices.map((inv) => {
-                  const overdue    = inv.payment_status === "unpaid" && isOverdue(inv.due_date);
-                  const isUpdating = updatingId === inv.id;
-                  const pd         = inv.partner_details || {};
-                  const missingDetails = !pd.address || !pd.phone || !pd.gstin;
-
+                {/* Generated invoice rows */}
+                {generatedRows.map((row, idx) => {
+                  const inv   = row.invoice!;
+                  const total = inv.total_amount || row.total;
+                  const outs  = Math.max(0, total - (inv.paid_amount || 0));
                   return (
-                    <tr
-                      key={inv.id}
-                      className={`border-b border-slate-100 transition ${overdue ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50"} ${isUpdating ? "opacity-60 pointer-events-none" : ""}`}
-                    >
-                      <td className="px-5 py-4">
-                        <p className="font-mono text-xs font-medium text-slate-700">{inv.invoice_number}</p>
-                        <p className="text-xs text-slate-400 mt-0.5 capitalize">{inv.invoice_type}</p>
+                    <tr key={idx} className="border-t border-slate-50 hover:bg-slate-50/60 transition">
+                      <td className="px-5 py-3">
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${typeColor(row.type)}`}>
+                          {row.label}
+                        </span>
                       </td>
-
-                      <td className="px-5 py-4">
-                        <p className="font-medium text-sm">{inv.partner_name}</p>
-                        {inv.notes && (
-                          <p className="text-xs text-slate-400 mt-0.5 max-w-[200px] truncate" title={inv.notes}>{inv.notes}</p>
+                      <td className="px-5 py-3 text-xs text-slate-500 font-mono">{inv.invoice_number}</td>
+                      <td className="px-5 py-3 text-right text-sm font-semibold text-slate-700">{fmt(total)}</td>
+                      <td className="px-5 py-3 text-right text-sm text-emerald-600 font-medium">{fmt(inv.paid_amount || 0)}</td>
+                      <td className="px-5 py-3 text-right text-sm">
+                        <span className={outs > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}>{fmt(outs)}</span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <StatusBadge
+                          inv={inv}
+                          onUpdated={(id, st, pd) => onInvUpdated(team.team_id, id, st, pd)}
+                        />
+                      </td>
+                      <td className="px-5 py-3">
+                        {inv.pdf_path && (
+                          <a
+                            href={`${API}/invoices/${inv.id}/download`}
+                            target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition font-medium"
+                          >
+                            <Download className="w-3 h-3" /> PDF
+                          </a>
                         )}
-                        {missingDetails && (
-                          <button
-                            onClick={() => setDetailsModal(inv)}
-                            className="mt-1 inline-flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium"
-                          >
-                            <AlertCircle className="w-3 h-3" /> Fill missing details
-                          </button>
-                        )}
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <p className="font-semibold text-sm">{fmtINR(inv.total_amount)}</p>
-                        <p className="text-xs text-slate-400">{fmtINR(inv.amount)} + GST {fmtINR(inv.gst_amount)}</p>
-                        {inv.payment_status === "partial" && inv.paid_amount > 0 && (
-                          <p className="text-xs text-orange-600 font-medium mt-0.5">
-                            Received: {fmtINR(inv.paid_amount)} · Balance: {fmtINR(inv.total_amount - inv.paid_amount)}
-                          </p>
-                        )}
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <p className="text-sm">{fmtDate(inv.due_date)}</p>
-                        {overdue && <p className="text-xs text-red-600 font-medium">Overdue</p>}
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <div className="space-y-2">
-                          <StatusBadge status={inv.payment_status} />
-                          <select
-                            value={inv.payment_status}
-                            disabled={isUpdating}
-                            onChange={(e) => handleStatusChange(inv, e.target.value)}
-                            className="block border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-2 focus:ring-purple-300 focus:outline-none cursor-pointer"
-                          >
-                            <option value="unpaid">Unpaid</option>
-                            <option value="partial">Partial</option>
-                            <option value="paid">Paid</option>
-                          </select>
-                        </div>
-                      </td>
-
-                      <td className="px-5 py-4 text-sm text-slate-500">{fmtDate(inv.payment_date)}</td>
-
-                      <td className="px-5 py-4">
-                        <div className="flex flex-col gap-1.5">
-                          <button
-                            onClick={() => handleDownload(inv)}
-                            disabled={downloadingId === inv.id}
-                            className="flex items-center gap-1.5 text-purple-600 hover:text-purple-800 text-xs font-medium transition disabled:opacity-50"
-                          >
-                            {downloadingId === inv.id
-                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Downloading...</>
-                              : <><Download className="w-3.5 h-3.5" /> Download PDF</>}
-                          </button>
-                          {!inv.pdf_path && <p className="text-xs text-slate-400">Generated on first download</p>}
-                          <button
-                            onClick={() => setDetailsModal(inv)}
-                            className="flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-xs font-medium transition"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" /> Edit Details
-                          </button>
-                        </div>
                       </td>
                     </tr>
                   );
                 })}
+
+                {/* Pending (not yet generated) rows */}
+                {pendingRows.map((row, idx) => (
+                  <tr key={`p-${idx}`} className="border-t border-amber-100 bg-amber-50/50">
+                    <td className="px-5 py-3">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${typeColor(row.type)}`}>
+                        {row.label}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-xs text-amber-500 italic flex items-center gap-1 pt-3.5">
+                      <Clock className="w-3 h-3" /> Not generated yet
+                    </td>
+                    <td className="px-5 py-3 text-right text-sm text-amber-700 font-semibold">{fmt(row.total)}</td>
+                    <td className="px-5 py-3 text-right text-sm text-slate-300">—</td>
+                    <td className="px-5 py-3 text-right text-sm text-slate-300">—</td>
+                    <td className="px-5 py-3">
+                      <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                        Pending
+                      </span>
+                    </td>
+                    <td className="px-5 py-3" />
+                  </tr>
+                ))}
+
+                {team.invoice_rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-6 text-center text-xs text-slate-400">
+                      No billable items for this team in FY {financialYear}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
-        )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export default function Invoices() {
+  const { financialYear, setFinancialYear, financialYears } = useFY();
+
+  const [teams, setTeams]     = useState<TeamEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState("");
+
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "pending" | "unpaid" | "partial" | "paid">("all");
+
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const [generatingTeam, setGeneratingTeam] = useState<number | null>(null);
+  const [generatingAll, setGeneratingAll]   = useState(false);
+  const [genMsg, setGenMsg]                 = useState("");
+
+  const [editingTeam, setEditingTeam] = useState<TeamEntry | null>(null);
+
+  // Default to invoice_queue — only shows teams needing attention
+  type Section = "all_teams" | "invoice_queue";
+  const [section, setSection] = useState<Section>("invoice_queue");
+
+  // ── Fetch ────────────────────────────────────────────────────────────────
+  const fetchTeams = useCallback(() => {
+    if (!financialYear) return;
+    setLoading(true); setError("");
+    fetch(`${API}/invoices/preflight?financial_year=${encodeURIComponent(financialYear)}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => {
+        const list: TeamEntry[] = Array.isArray(data.teams_preview) ? data.teams_preview : [];
+        setTeams(list);
+        // Auto-expand teams with pending invoices
+        setExpanded(new Set(list.filter(t => t.has_pending).map(t => t.team_id)));
+      })
+      .catch(e => setError(e.message || "Failed to load teams"))
+      .finally(() => setLoading(false));
+  }, [financialYear]);
+
+  useEffect(() => { fetchTeams(); }, [fetchTeams]);
+
+  // ── Optimistic invoice update ────────────────────────────────────────────
+  const handleInvUpdated = (teamId: number, invId: number, newStatus: string, newPaid: number) => {
+    setTeams(prev => prev.map(t => {
+      if (t.team_id !== teamId) return t;
+      const rows = t.invoice_rows.map(r => {
+        if (!r.invoice || r.invoice.id !== invId) return r;
+        return { ...r, invoice: { ...r.invoice, payment_status: newStatus as any, paid_amount: newPaid } };
+      });
+      const outstanding = rows
+        .filter(r => r.generated && r.invoice && r.invoice.payment_status !== "paid")
+        .reduce((s, r) => s + Math.max(0, (r.invoice!.total_amount || r.total) - (r.invoice!.paid_amount || 0)), 0);
+      return { ...t, invoice_rows: rows, outstanding };
+    }));
+  };
+
+  // ── Generate single team ─────────────────────────────────────────────────
+  const generateTeam = async (team: TeamEntry) => {
+    if (generatingTeam !== null || generatingAll) return;
+    setGeneratingTeam(team.team_id);
+    try {
+      const res = await fetch(
+        `${API}/invoices/generate/${team.team_id}?financial_year=${encodeURIComponent(financialYear)}`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (data.status === "success") fetchTeams();
+    } catch { /* silent */ }
+    finally { setGeneratingTeam(null); }
+  };
+
+  // ── Generate all ─────────────────────────────────────────────────────────
+  const generateAll = async () => {
+    if (generatingAll || generatingTeam !== null) return;
+    setGeneratingAll(true);
+    setGenMsg("Generating all invoices…");
+    try {
+      const res = await fetch(
+        `${API}/invoices/generate?financial_year=${encodeURIComponent(financialYear)}`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      const count = data.count ?? 0;
+      setGenMsg(count > 0 ? `✅ Generated ${count} invoice(s).` : "✅ All invoices already up to date.");
+      fetchTeams();
+      setTimeout(() => setGenMsg(""), 3500);
+    } catch (e: any) {
+      setGenMsg("❌ " + (e.message || "Error"));
+    } finally { setGeneratingAll(false); }
+  };
+
+  const toggle = (id: number) => setExpanded(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+
+  // ── Derived stats ────────────────────────────────────────────────────────
+  const pendingCount = teams.filter(t => t.has_pending).length;
+
+  const stats = teams.reduce((acc, t) => {
+    t.invoice_rows.forEach(r => {
+      if (!r.generated || !r.invoice) return;
+      const total = r.invoice.total_amount || r.total;
+      const paid  = r.invoice.paid_amount || 0;
+      acc.total       += total;
+      acc.paid        += paid;
+      acc.outstanding += Math.max(0, total - paid);
+      if (r.invoice.payment_status === "unpaid")  acc.unpaid++;
+      if (r.invoice.payment_status === "partial") acc.partial++;
+      if (r.invoice.payment_status === "paid")    acc.paidCount++;
+    });
+    return acc;
+  }, { total: 0, paid: 0, outstanding: 0, unpaid: 0, partial: 0, paidCount: 0 });
+
+  // Invoice queue = teams returned by preflight (already filtered server-side)
+  // All teams = same list (preflight only returns teams needing attention)
+  const invoiceQueueTeams = teams;
+
+  const baseList = section === "invoice_queue" ? invoiceQueueTeams : teams;
+
+  const filtered = baseList.filter(t => {
+    const q = search.toLowerCase();
+    if (q && !t.team_name.toLowerCase().includes(q) && !t.partner_name.toLowerCase().includes(q)) return false;
+    if (filter === "pending") return t.has_pending;
+    if (filter === "unpaid")  return t.invoice_rows.some(r => r.invoice?.payment_status === "unpaid");
+    if (filter === "partial") return t.invoice_rows.some(r => r.invoice?.payment_status === "partial");
+    if (filter === "paid")    return t.invoice_rows.length > 0 && t.invoice_rows.every(r => !r.generated || r.invoice?.payment_status === "paid");
+    return true;
+  });
+
+  return (
+    <div className="p-6 lg:p-8 min-h-screen bg-slate-50/50">
+
+      {/* ── HEADER ── */}
+      <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Invoices & Payments</h1>
+          <p className="text-slate-500 text-sm mt-1 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {teams.length} team{teams.length !== 1 ? "s" : ""} needing attention</span>
+            <span className="text-slate-300">·</span>
+            <span>FY {financialYear}</span>
+            {pendingCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold border border-amber-200">
+                {pendingCount} pending
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={financialYear} onChange={e => setFinancialYear(e.target.value)}
+            className="px-4 py-2 border border-slate-200 rounded-xl bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+          >
+            {financialYears.length > 0
+              ? financialYears.map(y => <option key={y.id} value={y.label}>FY {y.label}</option>)
+              : <option value={financialYear}>FY {financialYear}</option>}
+          </select>
+          <button
+            onClick={generateAll}
+            disabled={generatingAll || pendingCount === 0}
+            className="px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition shadow-sm
+              bg-violet-600 hover:bg-violet-700 text-white
+              disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none"
+          >
+            {generatingAll
+              ? <><RefreshCw className="w-4 h-4 animate-spin" /> Generating…</>
+              : pendingCount === 0
+                ? <><CheckCircle className="w-4 h-4" /> All Generated</>
+                : <><Zap className="w-4 h-4" /> Generate All ({pendingCount})</>
+            }
+          </button>
+        </div>
       </div>
+
+      {/* ── ALERTS ── */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-500 flex-shrink-0" />
+          <p className="text-rose-800 text-sm flex-1">{error}</p>
+          <button onClick={() => setError("")} className="p-1 rounded hover:bg-rose-100 transition"><X className="w-4 h-4 text-rose-400" /></button>
+        </div>
+      )}
+      {genMsg && (
+        <div className={`p-3.5 rounded-xl text-sm border mb-5 ${
+          genMsg.includes("✅") ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+          : genMsg.includes("Generating") ? "bg-violet-50 text-violet-800 border-violet-200"
+          : "bg-rose-50 text-rose-800 border-rose-200"}`}>
+          {genMsg}
+        </div>
+      )}
+
+      {/* ── KPI CARDS ── */}
+      {!loading && teams.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {[
+            { label: "Total Invoiced",  value: fmt(stats.total),       icon: IndianRupee,  color: "text-slate-700",   bg: "bg-slate-100" },
+            { label: "Amount Paid",     value: fmt(stats.paid),        icon: BadgeCheck,   color: "text-emerald-700", bg: "bg-emerald-100" },
+            { label: "Outstanding",     value: fmt(stats.outstanding), icon: Banknote,     color: "text-rose-700",    bg: "bg-rose-100" },
+            { label: "Unpaid Invoices", value: String(stats.unpaid),   icon: AlertCircle,  color: "text-amber-700",   bg: "bg-amber-100" },
+          ].map(c => (
+            <div key={c.label} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.bg}`}>
+                <c.icon className={`w-5 h-5 ${c.color}`} />
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs font-medium">{c.label}</p>
+                <p className={`text-xl font-bold mt-0.5 ${c.color}`}>{c.value}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── TOOLBAR ── */}
+      {!loading && teams.length > 0 && (
+        <div className="flex flex-wrap gap-3 mb-4 items-center">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search team or partner…"
+              className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl bg-white text-sm w-56 focus:outline-none focus:ring-2 focus:ring-violet-500 shadow-sm"
+            />
+          </div>
+          <div className="flex gap-1.5">
+            {(["all", "pending", "unpaid", "partial", "paid"] as const).map(s => (
+              <button
+                key={s} onClick={() => setFilter(s)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition capitalize ${
+                  filter === s
+                    ? s === "pending" ? "bg-amber-500 text-white border-amber-500"
+                    : s === "unpaid"  ? "bg-rose-600 text-white border-rose-600"
+                    : s === "partial" ? "bg-orange-500 text-white border-orange-500"
+                    : s === "paid"    ? "bg-emerald-600 text-white border-emerald-600"
+                    : "bg-violet-600 text-white border-violet-600"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="ml-auto flex gap-2">
+            <button
+              onClick={() => setExpanded(new Set(filtered.map(t => t.team_id)))}
+              className="text-xs text-violet-600 hover:underline"
+            >
+              Expand all
+            </button>
+            <span className="text-slate-300">|</span>
+            <button onClick={() => setExpanded(new Set())} className="text-xs text-slate-500 hover:underline">
+              Collapse all
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── LOADING ── */}
+      {loading && (
+        <div className="bg-white rounded-2xl p-16 text-center border border-slate-200 shadow-sm">
+          <RefreshCw className="w-6 h-6 animate-spin text-violet-600 mx-auto mb-3" />
+          <p className="text-slate-500 text-sm">Loading invoices…</p>
+        </div>
+      )}
+
+      {/* ── EMPTY — nothing needs attention ── */}
+      {!loading && teams.length === 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-16 text-center shadow-sm">
+          <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto mb-4" />
+          <p className="text-emerald-800 font-semibold">Invoice queue is clear!</p>
+          <p className="text-emerald-700 text-sm mt-1">
+            All teams for FY {financialYear} are up to date — no pending invoices or outstanding payments.
+          </p>
+        </div>
+      )}
+
+      {/* ── NO FILTER RESULTS ── */}
+      {!loading && teams.length > 0 && filtered.length === 0 && (
+        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
+          <Search className="w-8 h-8 text-slate-200 mx-auto mb-3" />
+          <p className="text-slate-500 text-sm">No teams match your search or filter.</p>
+          <button onClick={() => { setSearch(""); setFilter("all"); }} className="mt-3 text-xs text-violet-600 hover:underline">
+            Clear filters
+          </button>
+        </div>
+      )}
+
+      {/* ── TEAM CARDS ── */}
+      {!loading && filtered.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-1 mb-2">
+            <p className="text-xs text-slate-500">
+              Showing <span className="font-semibold text-slate-700">{filtered.length}</span>{" "}
+              team{filtered.length !== 1 ? "s" : ""} — pending invoices or outstanding payments
+            </p>
+          </div>
+
+          {filtered.map(team => (
+            <TeamCard
+              key={team.team_id}
+              team={team}
+              isOpen={expanded.has(team.team_id)}
+              isGenerating={generatingTeam === team.team_id}
+              generatingAll={generatingAll}
+              financialYear={financialYear}
+              onToggle={() => toggle(team.team_id)}
+              onGenerate={() => generateTeam(team)}
+              onEdit={() => setEditingTeam(team)}
+              onInvUpdated={handleInvUpdated}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* ── EDIT CONTACT MODAL ── */}
+      {editingTeam && (
+        <EditContactModal
+          team={editingTeam}
+          onSaved={() => { fetchTeams(); setEditingTeam(null); }}
+          onClose={() => setEditingTeam(null)}
+        />
+      )}
     </div>
   );
 }

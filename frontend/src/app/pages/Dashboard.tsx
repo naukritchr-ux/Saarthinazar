@@ -38,14 +38,17 @@ interface ChartTeam {
   jobs: number;
 }
 
-interface CriticalTeam {
+interface TeamData {
   id: number;
   name: string;
   status: string;
   usage: { cv: number; nvites: number; jobs: number };
   total_limits: { cv: number; nvites: number; jobs: number };
   usage_percent: { cv: number; nvites: number; jobs: number };
+  outstanding_invoice: number;
 }
+
+type CriticalTeam = TeamData;
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -55,6 +58,7 @@ export default function Dashboard() {
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [criticalTeams, setCriticalTeams] = useState<CriticalTeam[]>([]);
+  const [allTeams, setAllTeams] = useState<TeamData[]>([]);
   const [chartData, setChartData] = useState<ChartTeam[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -97,6 +101,7 @@ export default function Dashboard() {
     setDashboardError(null);
     setSummary(null);
     setCriticalTeams([]);
+    setAllTeams([]);
     setChartData([]);
 
     const token = localStorage.getItem("token");
@@ -112,6 +117,7 @@ export default function Dashboard() {
         if (cancelled) return;
         setSummary(summaryData);
         setCriticalTeams(Array.isArray(criticalData) ? criticalData.slice(0, 5) : []);
+        setAllTeams(Array.isArray(teamsData) ? teamsData : []);
         const sorted = (Array.isArray(teamsData) ? teamsData : [])
           .sort((a: any, b: any) => (b.usage?.cv ?? 0) - (a.usage?.cv ?? 0))
           .slice(0, 10)
@@ -293,11 +299,17 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+            <div
+              className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 cursor-pointer hover:border-orange-300 transition"
+              onClick={() => navigate("/invoices")}
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-slate-600 text-sm">Outstanding Invoices</p>
                   <p className="text-3xl font-bold mt-2">₹{(summary.outstanding_invoices / 100000).toFixed(1)}L</p>
+                  {summary.outstanding_invoice_count > 0 && (
+                    <p className="text-xs text-orange-600 mt-1 font-medium">{summary.outstanding_invoice_count} unpaid invoice{summary.outstanding_invoice_count !== 1 ? "s" : ""}</p>
+                  )}
                 </div>
                 <DollarSign className="w-12 h-12 text-orange-100" />
               </div>
@@ -383,6 +395,58 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+
+          {/* TEAMS WITH OUTSTANDING INVOICES */}
+          {allTeams.some(t => (t.outstanding_invoice || 0) > 0) && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium">Teams with Outstanding Invoices</h3>
+                <button onClick={() => navigate("/invoices")} className="text-sm text-purple-600 hover:underline">View all invoices →</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="pb-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Team</th>
+                      <th className="pb-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Usage Status</th>
+                      <th className="pb-2 text-right text-xs font-medium text-slate-500 uppercase tracking-wide">CV Used</th>
+                      <th className="pb-2 text-right text-xs font-medium text-slate-500 uppercase tracking-wide">Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allTeams
+                      .filter(t => (t.outstanding_invoice || 0) > 0)
+                      .sort((a, b) => (b.outstanding_invoice || 0) - (a.outstanding_invoice || 0))
+                      .map(team => {
+                        const statusColor =
+                          team.status === "Critical" || team.status === "Over limit" ? "bg-red-100 text-red-700"
+                          : team.status === "Warning" ? "bg-orange-100 text-orange-700"
+                          : "bg-green-100 text-green-700";
+                        return (
+                          <tr key={team.id} className="border-b border-slate-50 hover:bg-slate-50 transition">
+                            <td className="py-3 text-sm font-medium text-slate-800">{team.name}</td>
+                            <td className="py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
+                                {team.status}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right text-sm text-slate-600">
+                              {(team.usage?.cv || 0).toLocaleString("en-IN")}
+                              <span className="text-slate-400"> / {(team.total_limits?.cv || 0).toLocaleString("en-IN")}</span>
+                            </td>
+                            <td className="py-3 text-right">
+                              <span className="text-sm font-semibold text-orange-600">
+                                ₹{(team.outstanding_invoice || 0).toLocaleString("en-IN")}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* PENDING ACTIONS */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">

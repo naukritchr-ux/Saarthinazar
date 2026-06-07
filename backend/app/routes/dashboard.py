@@ -120,17 +120,29 @@ def _bulk_load(db: Session, team_ids: list[int], financial_year: str) -> dict:
         adj_by_team[row.team_id]["jobs"] += row.jobs_adjustment or 0
 
     # Outstanding invoices — grouped by team_id
+    # Use total_amount (incl. GST) if available, fall back to amount (pre-GST)
+    # Only look at invoices for THIS financial year to avoid cross-FY bleed
     invoice_rows = (
         db.query(Invoice)
         .filter(
             Invoice.team_id.in_(team_ids),
-            Invoice.status != "Paid",
+            Invoice.financial_year == financial_year,
+        )
+        .filter(
+            Invoice.payment_status.notin_(["paid"]),
         )
         .all()
     )
     outstanding_by_team: dict[int, float] = defaultdict(float)
     for inv in invoice_rows:
-        outstanding_by_team[inv.team_id] += max(0, (inv.amount or 0) - (inv.paid_amount or 0))
+        # Skip invoices that are fully paid (check both status columns)
+        ps = (inv.payment_status or "").lower().strip()
+        s  = (inv.status or "").lower().strip()
+        if ps == "paid" or s == "paid":
+            continue
+        total = float(inv.total_amount or 0) or float(inv.amount or 0)
+        paid  = float(inv.paid_amount or 0)
+        outstanding_by_team[inv.team_id] += max(0, total - paid)
 
     return {
         "usage": usage_by_team,
@@ -142,10 +154,12 @@ def _bulk_load(db: Session, team_ids: list[int], financial_year: str) -> dict:
 
 
 def _effective_limits_from_bulk(team: Team, bulk: dict) -> dict:
-    licences = team.licences or 1
-    base_cv = (team.cv_limit or 0) * licences
-    base_nvites = (team.nvites_limit or 0) * licences
-    base_jobs = (team.jobs_limit or 0) * licences
+    # cv_limit / nvites_limit / jobs_limit on the Team row already represent
+    # the TOTAL for the team (pricing_per_licence * licences was applied when
+    # the team was created / updated).  Do NOT multiply by licences again.
+    base_cv = team.cv_limit or 0
+    base_nvites = team.nvites_limit or 0
+    base_jobs = team.jobs_limit or 0
     topups = bulk["topups"][team.id]
     adjs = bulk["adjustments"][team.id]
     return {
@@ -176,7 +190,7 @@ def _team_payload_from_bulk(team: Team, bulk: dict, financial_year: str) -> dict
         "topups": topups,
         "total_limits": limits,
         "usage": usage,
-        "remaining": {key: limits[key] - usage[key] for key in INVENTORY_TYPES},
+        "remaining": {key: max(0, limits[key] - usage[key]) for key in INVENTORY_TYPES},
         "usage_percent": percentages,
         "status": status_for_percent(max(percentages.values(), default=0)),
         "outstanding_invoice": bulk["outstanding"][team.id],

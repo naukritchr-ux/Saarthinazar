@@ -11,6 +11,13 @@ from app.utils.security import get_current_user
 router = APIRouter(prefix="/financial")
 
 
+def _effective_total_plain(inv) -> float:
+    """Same logic as invoices.py _effective_total — use whichever field is non-zero."""
+    t = float(inv.total_amount or 0)
+    a = float(inv.amount or 0)
+    return t if t > 0 else a
+
+
 @router.get("/overview")
 def financial_overview(
     current_user: User = Depends(get_current_user),
@@ -81,43 +88,31 @@ def get_financial_insights(
     # =====================================================
 
     total_revenue = sum(
-        i.total_amount or 0
+        _effective_total_plain(i)
         for i in invoices
     )
 
     outstanding = sum(
-
-        i.total_amount or 0
-
+        _effective_total_plain(i)
         for i in invoices
-
         if i.payment_status != "paid"
     )
 
     paid_amount = sum(
-
-        i.total_amount or 0
-
+        i.paid_amount or 0
         for i in invoices
-
         if i.payment_status == "paid"
     )
 
     partial_amount = sum(
-
-        i.total_amount or 0
-
+        i.paid_amount or 0
         for i in invoices
-
         if i.payment_status == "partial"
     )
 
     unpaid_amount = sum(
-
-        i.total_amount or 0
-
+        _effective_total_plain(i)
         for i in invoices
-
         if i.payment_status == "unpaid"
     )
 
@@ -137,16 +132,13 @@ def get_financial_insights(
         ]
 
         revenue = sum(
-            i.total_amount or 0
+            _effective_total_plain(i)
             for i in team_invoices
         )
 
         outstanding_team = sum(
-
-            i.total_amount or 0
-
+            _effective_total_plain(i)
             for i in team_invoices
-
             if i.payment_status != "paid"
         )
 
@@ -202,13 +194,8 @@ def get_financial_insights(
                 "cost": 0,
             }
 
-        monthly_map[month]["revenue"] += (
-            invoice.total_amount or 0
-        )
-
-        monthly_map[month]["cost"] += (
-            (invoice.total_amount or 0) * 0.7
-        )
+        monthly_map[month]["revenue"] += _effective_total_plain(invoice)
+        monthly_map[month]["cost"] += _effective_total_plain(invoice) * 0.7
 
     revenue_trend = list(
         monthly_map.values()

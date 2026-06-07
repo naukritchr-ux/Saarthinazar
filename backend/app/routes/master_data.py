@@ -328,6 +328,20 @@ def update_pricing(
 
     item.updated_by = user["username"]
 
+    # Cascade new limits to all teams using this pricing plan (if not manually overridden)
+    teams_using_plan = (
+        db.query(Team)
+        .filter(
+            Team.financial_year == item.financial_year,
+            Team.join_period == item.period,
+            Team.partner_type == item.partner_type,
+            Team.is_active == True,
+        )
+        .all()
+    )
+    for t in teams_using_plan:
+        _recalc_limits(t, item)
+
     add_audit(
         db,
         user["username"],
@@ -419,6 +433,21 @@ def lock_pricing_plan(
     plan.is_locked = locked
     plan.updated_by = user["username"]
 
+    # When locking a plan, cascade the confirmed limits to all teams using it
+    if locked:
+        teams_using_plan = (
+            db.query(Team)
+            .filter(
+                Team.financial_year == plan.financial_year,
+                Team.join_period == plan.period,
+                Team.partner_type == plan.partner_type,
+                Team.is_active == True,
+            )
+            .all()
+        )
+        for t in teams_using_plan:
+            _recalc_limits(t, plan)
+
     add_audit(
         db,
         user["username"],
@@ -438,6 +467,14 @@ def lock_pricing_plan(
 
 # =====================================================
 # TEAM MASTER LIST
+#
+# Returns teams that belong to this FY — either by their
+# stored financial_year column (master-data created) OR
+# by having SubUserUsage records for this FY (report-
+# uploaded teams whose financial_year column may still
+# carry the old default).  Union ensures TopUps page
+# always shows the right team list regardless of how the
+# team was onboarded.
 # =====================================================
 
 @router.get("/teams")
@@ -445,17 +482,40 @@ def list_teams(
     financial_year: str,
     db: Session = Depends(get_db),
 ):
+    from app.models.usage import SubUserUsage
 
-    teams = (
+    # 1. Teams explicitly tagged with this FY
+    by_fy = (
         db.query(Team)
-        .filter(
-            Team.financial_year == financial_year
-        )
-        .order_by(Team.name)
+        .filter(Team.financial_year == financial_year)
         .all()
     )
 
-    return [_team_row(t) for t in teams]
+    # 2. Teams that have usage records in this FY
+    #    (covers auto-created teams from report uploads
+    #     whose financial_year column may be a different year)
+    usage_team_ids = (
+        db.query(SubUserUsage.team_id)
+        .filter(SubUserUsage.financial_year == financial_year)
+        .distinct()
+        .subquery()
+    )
+    by_usage = (
+        db.query(Team)
+        .filter(Team.id.in_(usage_team_ids))
+        .all()
+    )
+
+    # Union — deduplicate by id
+    seen: set[int] = set()
+    merged: list[Team] = []
+    for t in by_fy + by_usage:
+        if t.id not in seen:
+            seen.add(t.id)
+            merged.append(t)
+
+    merged.sort(key=lambda t: t.name)
+    return [_team_row(t) for t in merged]
 
 
 # =====================================================
@@ -713,4 +773,56 @@ def preview_limits(
         "nvites_limit": (plan.nvites_limit or 0) * n,
         "jobs_limit": (plan.jobs_limit or 0) * n,
         "licence_fee": (plan.licence_fee or 0) * n,
+    }
+
+
+# =====================================================
+# RESYNC ALL TEAMS TO THEIR PRICING PLAN
+# Force-recalculates limits for every team based on
+# their current join_period + partner_type + licences.
+# Use after correcting pricing plan values.
+# =====================================================
+
+@router.post("/teams/resync")
+def resync_team_limits(
+    financial_year: str,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    user = require_owner(authorization)
+
+    from app.models.usage import SubUserUsage
+    # All teams in this FY (both by tag and by usage)
+    usage_ids = {
+        r.team_id for r in db.query(SubUserUsage.team_id)
+        .filter(SubUserUsage.financial_year == financial_year).all()
+    }
+    tagged_teams = db.query(Team).filter(Team.financial_year == financial_year).all()
+    all_ids = {t.id for t in tagged_teams} | usage_ids
+    all_teams = db.query(Team).filter(Team.id.in_(all_ids)).all()
+
+    updated = []
+    skipped = []
+    for team in all_teams:
+        plan = _pricing_for_team(db, financial_year, team.join_period, team.partner_type)
+        if plan and not plan.is_locked:
+            # Not locked — recalc
+            _recalc_limits(team, plan)
+            updated.append(team.name)
+        elif plan and plan.is_locked:
+            # Locked — still apply (lock just prevents UI edits, not sync)
+            _recalc_limits(team, plan)
+            updated.append(team.name)
+        else:
+            skipped.append(team.name)
+
+    add_audit(db, user["username"], "resync_teams", "team", 0, {"financial_year": financial_year})
+    db.commit()
+
+    return {
+        "status": "success",
+        "updated": len(updated),
+        "skipped": len(skipped),
+        "updated_teams": updated,
+        "skipped_teams": skipped,
     }

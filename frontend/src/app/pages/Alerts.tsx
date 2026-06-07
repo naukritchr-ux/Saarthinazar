@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react";
-
 import {
   useNavigate
 } from "react-router-dom";
 import { useFY } from "../context/FYContext";
 import {
   Send, MessageSquare, Mail, X,
-  RefreshCw, AlertCircle, CheckCircle,
+  RefreshCw, AlertCircle, CheckCircle, Search, ChevronUp, ChevronDown,
 } from "lucide-react";
 
-import API from "../services/api";
+const API = "http://127.0.0.1:8000";
 
 interface Member {
   name: string;
@@ -26,12 +25,10 @@ interface AlertTeam {
   partner_email: string;
   type: "warning" | "critical" | "exceeded";
   status: string;
-  // new fields from backend
   licence_count: number;
   cv_limit_base: number;
   topup_cv_total: number;
   topup_cv_list: number[];
-  // usage
   cv_usage: number;
   cv_limit: number;
   nvites_usage: number;
@@ -48,7 +45,7 @@ interface AlertTeam {
 }
 
 // =====================================================
-// HELPERS FOR NEW MESSAGE FORMAT
+// HELPERS
 // =====================================================
 
 function getFirstName(fullName: string): string {
@@ -66,10 +63,6 @@ function getFYEndDate(financialYear: string): string {
   const match = financialYear.match(/\d{4}-(\d{4})/);
   return match ? `31st March ${match[1]}` : "31st March";
 }
-
-// =====================================================
-// SHARED MESSAGE BUILDER (same format for WA & email)
-// =====================================================
 
 function buildUsageMessage(a: AlertTeam): string {
   const firstName = getFirstName(a.partner_name || a.team_name);
@@ -105,14 +98,12 @@ function buildUsageMessage(a: AlertTeam): string {
     lines.push(`Usage: ${totalCvUsage.toLocaleString("en-IN")}`);
   }
 
-  // Initial Purchase
   if (licences > 1) {
     lines.push(`Initial Purchase: ${cvBase} x ${licences} = Rs ${baseTotal.toLocaleString("en-IN")}`);
   } else {
     lines.push(`Initial Purchase: ${cvBase}`);
   }
 
-  // Extra Purchase
   if (topupList.length > 1) {
     lines.push(`Extra Purchase: ${topupList.join("+")}= ${topupTotal.toLocaleString("en-IN")}`);
   } else if (topupList.length === 1) {
@@ -121,10 +112,8 @@ function buildUsageMessage(a: AlertTeam): string {
     lines.push(`Extra Purchase: `);
   }
 
-  // Total Purchase
   lines.push(`Total Purchase: ${totalPurchase.toLocaleString("en-IN")}`);
 
-  // Over Use + Cost (only if overuse exists)
   if (overUse > 0) {
     lines.push(`Over Use: ${overUse.toLocaleString("en-IN")}`);
     lines.push(`Final Cost of Over Usage Until ${endDate}: Rs ${finalCost.toLocaleString("en-IN")}+ GST. `);
@@ -141,10 +130,6 @@ function buildUsageMessage(a: AlertTeam): string {
   return lines.join("\n");
 }
 
-// =====================================================
-// WHATSAPP MESSAGE GENERATOR
-// =====================================================
-
 function buildWhatsAppMessage(a: AlertTeam): string {
   return buildUsageMessage(a);
 }
@@ -152,10 +137,6 @@ function buildWhatsAppMessage(a: AlertTeam): string {
 function buildEmailBody(a: AlertTeam): string {
   return buildUsageMessage(a);
 }
-
-// =====================================================
-// BADGE HELPERS
-// =====================================================
 
 function AlertBadge({ type }: { type: string }) {
   if (type === "exceeded")
@@ -179,22 +160,29 @@ function pct(u: number, l: number) {
 // MAIN
 // =====================================================
 
-export default function Alerts() {
+type SortKey = "team_name" | "cv_usage" | "cv_limit" | "overage_amount" | "type";
+type SortOrder = "asc" | "desc";
 
+export default function Alerts() {
   const navigate = useNavigate();
   const { financialYear, setFinancialYear, financialYears } = useFY();
-  const [alerts, setAlerts] = useState<AlertTeam[]>([]);
+  const [allAlerts, setAllAlerts] = useState<AlertTeam[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [statusFilter, setStatusFilter] = useState<"all" | "exceeded" | "critical" | "warning">("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("type");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
 
   const [previewAlert, setPreviewAlert] = useState<AlertTeam | null>(null);
   const [previewTab, setPreviewTab] = useState<"whatsapp" | "email">("whatsapp");
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [sentIds, setSentIds] = useState<Set<number>>(new Set());
 
-  // ---------------------------------------------------
+  // ===================================================
   // Fetch alerts
-  // ---------------------------------------------------
+  // ===================================================
   const fetchAlerts = () => {
     if (!financialYear) return;
     setLoading(true);
@@ -202,8 +190,8 @@ export default function Alerts() {
     fetch(`${API}/alerts/?financial_year=${encodeURIComponent(financialYear)}`)
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) setAlerts(data);
-        else setAlerts([]);
+        if (Array.isArray(data)) setAllAlerts(data);
+        else setAllAlerts([]);
       })
       .catch(() => setError("Failed to load alerts. Is the server running?"))
       .finally(() => setLoading(false));
@@ -211,9 +199,48 @@ export default function Alerts() {
 
   useEffect(() => { fetchAlerts(); }, [financialYear]);
 
-  // ---------------------------------------------------
-  // Send alert email via backend
-  // ---------------------------------------------------
+  // ===================================================
+  // Filter & Sort
+  // ===================================================
+  const filteredAlerts = allAlerts
+    .filter((a) => {
+      if (statusFilter === "all") return true;
+      return a.type === statusFilter;
+    })
+    .filter((a) => {
+      if (!searchTerm) return true;
+      return a.team_name.toLowerCase().includes(searchTerm.toLowerCase());
+    })
+    .sort((a, b) => {
+      let aVal: any = a[sortKey];
+      let bVal: any = b[sortKey];
+
+      if (sortKey === "type") {
+        const order = { exceeded: 0, critical: 1, warning: 2 };
+        aVal = order[a.type as keyof typeof order];
+        bVal = order[b.type as keyof typeof order];
+      }
+
+      if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
+      return 0;
+    });
+
+  // ===================================================
+  // Toggle sort
+  // ===================================================
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortOrder("asc");
+    }
+  };
+
+  // ===================================================
+  // Send alert
+  // ===================================================
   const handleSendAlert = async (a: AlertTeam) => {
     setSendingId(a.team_id);
     try {
@@ -234,18 +261,11 @@ export default function Alerts() {
     }
   };
 
-  // ---------------------------------------------------
-  // Open WhatsApp with pre-filled message
-  // ---------------------------------------------------
   const openWhatsApp = (a: AlertTeam) => {
     const msg = encodeURIComponent(buildWhatsAppMessage(a));
-    // Opens WhatsApp with message pre-filled; no phone hardcoded
     window.open(`https://wa.me/?text=${msg}`, "_blank");
   };
 
-  // ---------------------------------------------------
-  // Open email client with pre-filled draft
-  // ---------------------------------------------------
   const openEmail = (a: AlertTeam) => {
     const subject = encodeURIComponent(`Naukri.com Usage Alert — ${a.team_name} | FY ${financialYear}`);
     const body = encodeURIComponent(buildEmailBody(a));
@@ -253,12 +273,16 @@ export default function Alerts() {
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
   };
 
-  // ---------------------------------------------------
+  // ===================================================
   // Stats
-  // ---------------------------------------------------
-  const exceededCount = alerts.filter((a) => a.type === "exceeded").length;
-  const criticalCount = alerts.filter((a) => a.type === "critical").length;
-  const warningCount = alerts.filter((a) => a.type === "warning").length;
+  // ===================================================
+  const exceededCount = allAlerts.filter((a) => a.type === "exceeded").length;
+  const criticalCount = allAlerts.filter((a) => a.type === "critical").length;
+  const warningCount = allAlerts.filter((a) => a.type === "warning").length;
+
+  // ===================================================
+  // UI
+  // ===================================================
 
   return (
     <div className="p-8">
@@ -297,7 +321,7 @@ export default function Alerts() {
           <p className="text-3xl font-medium text-red-600">{exceededCount}</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-          <p className="text-slate-600 mb-2">Critical Alerts (90%+)</p>
+          <p className="text-slate-600 mb-2">Critical & Warning Alerts</p>
           <p className="text-3xl font-medium text-orange-600">{criticalCount + warningCount}</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
@@ -315,6 +339,51 @@ export default function Alerts() {
         </div>
       )}
 
+      {/* FILTERS & SEARCH */}
+      {!loading && allAlerts.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex gap-4 items-center flex-wrap">
+          {/* Status Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-slate-700">Status Filter:</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="px-3 py-1 border border-slate-300 rounded-lg text-sm bg-white"
+            >
+              <option value="all">All ({allAlerts.length})</option>
+              <option value="exceeded">Exceeded ({exceededCount})</option>
+              <option value="critical">Critical ({criticalCount})</option>
+              <option value="warning">Warning ({warningCount})</option>
+            </select>
+          </div>
+
+          {/* Search */}
+          <div className="flex items-center gap-2 flex-1 max-w-sm">
+            <Search className="w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search team name..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1 px-3 py-1 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Results count */}
+          <span className="text-sm text-slate-500 ml-auto">
+            {filteredAlerts.length} of {allAlerts.length} teams
+          </span>
+        </div>
+      )}
+
       {/* LOADING */}
       {loading && (
         <div className="flex justify-center py-12">
@@ -323,7 +392,7 @@ export default function Alerts() {
       )}
 
       {/* EMPTY */}
-      {!loading && alerts.length === 0 && (
+      {!loading && allAlerts.length === 0 && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-10 text-center">
           <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-3" />
           <p className="text-green-800 font-medium text-lg">All teams within limits</p>
@@ -333,10 +402,21 @@ export default function Alerts() {
         </div>
       )}
 
+      {/* NO RESULTS AFTER FILTER */}
+      {!loading && allAlerts.length > 0 && filteredAlerts.length === 0 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-10 text-center">
+          <AlertCircle className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+          <p className="text-slate-600 font-medium text-lg">No teams match your filters</p>
+          <p className="text-slate-500 text-sm mt-1">
+            Try adjusting your search or filter criteria
+          </p>
+        </div>
+      )}
+
       {/* ALERT CARDS */}
-      {!loading && (
+      {!loading && filteredAlerts.length > 0 && (
         <div className="space-y-4">
-          {alerts.map((a) => (
+          {filteredAlerts.map((a) => (
             <div
               key={a.team_id}
               className={`rounded-xl p-6 border ${alertBg(a.type)}`}
@@ -358,7 +438,7 @@ export default function Alerts() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={() => { setPreviewAlert(a); setPreviewTab("whatsapp"); }}
                     className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
@@ -387,12 +467,6 @@ export default function Alerts() {
                       : <Send className="w-4 h-4" />}
                     {sendingId === a.team_id ? "Sending..." : "Send Email"}
                   </button>
-                  <button
-                    onClick={() => navigate("/dashboard")}
-                  className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
-                >
-                  Review
-                </button>
                 </div>
               </div>
 
@@ -406,11 +480,10 @@ export default function Alerts() {
                   <div key={label} className="bg-white rounded-lg p-3 border border-slate-200">
                     <p className="text-xs text-slate-600 mb-1">{label}</p>
                     <p className="font-medium text-sm">
-                    {(used ?? 0).toLocaleString()} / {(limit ?? 0).toLocaleString()}
+                      {(used ?? 0).toLocaleString()} / {(limit ?? 0).toLocaleString()}
                     </p>
-
                     <p className="text-xs text-slate-500 mt-0.5">
-                    {pct(used ?? 0, limit ?? 0)}% used · {(rem ?? 0).toLocaleString()} remaining
+                      {pct(used ?? 0, limit ?? 0)}% used · {(rem ?? 0).toLocaleString()} remaining
                     </p>
                   </div>
                 ))}
