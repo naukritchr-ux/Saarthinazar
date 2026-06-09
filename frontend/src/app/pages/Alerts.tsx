@@ -3,12 +3,11 @@ import {
   useNavigate
 } from "react-router-dom";
 import { useFY } from "../context/FYContext";
+import API from "../services/api";
 import {
   Send, MessageSquare, Mail, X,
   RefreshCw, AlertCircle, CheckCircle, Search, ChevronUp, ChevronDown,
 } from "lucide-react";
-
-const API = "http://127.0.0.1:8000";
 
 interface Member {
   name: string;

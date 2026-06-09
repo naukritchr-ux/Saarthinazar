@@ -91,13 +91,14 @@ def _bulk_load_alerts(db: Session, team_ids: list[int], financial_year: str) -> 
 
 
 def _limits_from_bulk(team: Team, bulk: dict) -> dict:
-    licences = team.licences or 1
+    # team.cv_limit etc. are already stored as TOTAL (base × licences).
+    # Do NOT multiply by licences again here.
     topups = bulk["topups"][team.id]
-    adjs = bulk["adjustments"][team.id]
+    adjs   = bulk["adjustments"][team.id]
     return {
-        "cv": (team.cv_limit or 0) * licences + topups["cv"] + adjs["cv"],
-        "nvites": (team.nvites_limit or 0) * licences + topups["nvites"] + adjs["nvites"],
-        "jobs": (team.jobs_limit or 0) * licences + topups["jobs"] + adjs["jobs"],
+        "cv":     (team.cv_limit     or 0) + topups["cv"]     + adjs["cv"],
+        "nvites": (team.nvites_limit or 0) + topups["nvites"] + adjs["nvites"],
+        "jobs":   (team.jobs_limit   or 0) + topups["jobs"]   + adjs["jobs"],
     }
 
 
@@ -130,7 +131,7 @@ def get_alerts(
 ):
     teams = (
         db.query(Team)
-        .filter(Team.is_active == True)
+        .filter(Team.is_active.isnot(False))   # include active=True AND active=None (report-created teams)
         .order_by(Team.name)
         .all()
     )

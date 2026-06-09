@@ -245,9 +245,7 @@ def preflight_check(financial_year: str = Query(...), db: Session = Depends(get_
                 max(0, _effective_total(combined_inv) - float(combined_inv.paid_amount or 0))
                 if combined_inv.payment_status != "paid" else 0
             )
-            # Only include if not fully paid
-            if outstanding <= 0 and combined_inv.payment_status == "paid":
-                continue
+            # Always include — even fully paid teams should appear in the list
 
             missing = _missing_fields(team)
             if missing:
@@ -340,10 +338,8 @@ def preflight_check(financial_year: str = Query(...), db: Session = Depends(get_
         )
         any_invoice = any(r["generated"] and r["invoice"] for r in invoice_rows)
 
-        # Only include teams with something actionable
-        if not has_pending and not (any_invoice and outstanding > 0):
-            continue
-
+        # Include team regardless — caller sees all teams for this FY
+        # (previously skipped fully-paid / no-outstanding teams, causing them to disappear)
         teams_preview.append({
             "team_id":        team.id,
             "team_name":      team.name,

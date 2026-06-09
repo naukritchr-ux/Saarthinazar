@@ -532,9 +532,8 @@ export default function Invoices() {
 
   const [editingTeam, setEditingTeam] = useState<TeamEntry | null>(null);
 
-  // Default to invoice_queue — only shows teams needing attention
-  type Section = "all_teams" | "invoice_queue";
-  const [section, setSection] = useState<Section>("invoice_queue");
+  // Missing-fields confirmation before generating
+  const [pendingGenTeam, setPendingGenTeam] = useState<TeamEntry | null>(null);
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchTeams = useCallback(() => {
@@ -570,7 +569,8 @@ export default function Invoices() {
   };
 
   // ── Generate single team ─────────────────────────────────────────────────
-  const generateTeam = async (team: TeamEntry) => {
+  // Called after user confirms (or there are no missing fields)
+  const doGenerateTeam = async (team: TeamEntry) => {
     if (generatingTeam !== null || generatingAll) return;
     setGeneratingTeam(team.team_id);
     try {
@@ -582,6 +582,15 @@ export default function Invoices() {
       if (data.status === "success") fetchTeams();
     } catch { /* silent */ }
     finally { setGeneratingTeam(null); }
+  };
+
+  // Called when user clicks Generate — shows warning prompt if details are missing
+  const generateTeam = (team: TeamEntry) => {
+    if (team.missing_fields.length > 0) {
+      setPendingGenTeam(team);
+    } else {
+      doGenerateTeam(team);
+    }
   };
 
   // ── Generate all ─────────────────────────────────────────────────────────
@@ -609,6 +618,7 @@ export default function Invoices() {
   });
 
   // ── Derived stats ────────────────────────────────────────────────────────
+  // pendingCount is based on all teams (not just filtered)
   const pendingCount = teams.filter(t => t.has_pending).length;
 
   const stats = teams.reduce((acc, t) => {
@@ -626,11 +636,7 @@ export default function Invoices() {
     return acc;
   }, { total: 0, paid: 0, outstanding: 0, unpaid: 0, partial: 0, paidCount: 0 });
 
-  // Invoice queue = teams returned by preflight (already filtered server-side)
-  // All teams = same list (preflight only returns teams needing attention)
-  const invoiceQueueTeams = teams;
-
-  const baseList = section === "invoice_queue" ? invoiceQueueTeams : teams;
+  const baseList = teams;
 
   const filtered = baseList.filter(t => {
     const q = search.toLowerCase();
@@ -650,7 +656,7 @@ export default function Invoices() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Invoices & Payments</h1>
           <p className="text-slate-500 text-sm mt-1 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {teams.length} team{teams.length !== 1 ? "s" : ""} needing attention</span>
+            <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {teams.length} team{teams.length !== 1 ? "s" : ""}</span>
             <span className="text-slate-300">·</span>
             <span>FY {financialYear}</span>
             {pendingCount > 0 && (
@@ -805,7 +811,7 @@ export default function Invoices() {
           <div className="flex items-center justify-between px-1 mb-2">
             <p className="text-xs text-slate-500">
               Showing <span className="font-semibold text-slate-700">{filtered.length}</span>{" "}
-              team{filtered.length !== 1 ? "s" : ""} — pending invoices or outstanding payments
+              team{filtered.length !== 1 ? "s" : ""}
             </p>
           </div>
 
@@ -833,6 +839,54 @@ export default function Invoices() {
           onSaved={() => { fetchTeams(); setEditingTeam(null); }}
           onClose={() => setEditingTeam(null)}
         />
+      )}
+
+      {/* ── MISSING FIELDS CONFIRMATION MODAL ── */}
+      {pendingGenTeam && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <h3 className="font-semibold text-slate-800">Missing Invoice Details</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{pendingGenTeam.team_name}</p>
+              </div>
+              <button onClick={() => setPendingGenTeam(null)} className="p-1.5 rounded-lg hover:bg-slate-100 transition">
+                <X className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <TriangleAlert className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-900">The following details are missing:</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {pendingGenTeam.missing_fields.map(f => (
+                      <li key={f} className="text-sm text-amber-800 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-amber-700 mt-2">These fields appear on the invoice PDF. Missing info may result in an incomplete document.</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5 border-t border-slate-100 flex gap-3 justify-end">
+              <button
+                onClick={() => { setPendingGenTeam(null); setEditingTeam(pendingGenTeam); }}
+                className="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-semibold hover:bg-amber-600 transition flex items-center gap-2"
+              >
+                <Pencil className="w-3.5 h-3.5" /> Fill Details First
+              </button>
+              <button
+                onClick={() => { const t = pendingGenTeam; setPendingGenTeam(null); doGenerateTeam(t); }}
+                className="px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition flex items-center gap-2"
+              >
+                <Zap className="w-3.5 h-3.5" /> Generate Anyway
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
