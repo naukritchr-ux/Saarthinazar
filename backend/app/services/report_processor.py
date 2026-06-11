@@ -397,32 +397,32 @@ class ReportProcessor:
         required: bool = True,
     ) -> str | None:
 
-        for col in df.columns:
-
-            compact = (
-                str(col)
-                .strip()
-                .strip("'")
-                .strip('"')
-                .lower()
+        # Normalise all column names once
+        compact_cols = [
+            (
+                col,
+                str(col).strip().strip("'").strip('"').lower()
             )
+            for col in df.columns
+        ]
 
-            if (
+        # Priority 1: exact match against any alias (aliases are ordered
+        # most-specific first, so the first exact hit wins)
+        for alias in aliases:
+            for col, compact in compact_cols:
+                if compact == alias:
+                    return col
 
-                compact in aliases
-
-                or any(
-                    alias in compact
-                    for alias in aliases
-                )
-            ):
-
-                return col
+        # Priority 2: alias is a substring of the column header —
+        # iterate aliases first so the most-specific alias wins, not
+        # whichever column happens to appear earliest in the sheet.
+        for alias in aliases:
+            for col, compact in compact_cols:
+                if alias in compact:
+                    return col
 
         if required:
-
             raise ValueError(
-
                 f"Could not find required column. "
                 f"Expected one of: "
                 f"{', '.join(aliases)}"
