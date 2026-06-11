@@ -279,7 +279,10 @@ export default function Dashboard() {
         <>
           {/* KPI CARDS */}
           <div className="grid grid-cols-4 gap-6 mb-8">
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+            <div
+              className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+              title={`${summary.total_teams} teams`}
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-slate-600 text-sm">Total Teams</p>
@@ -289,7 +292,9 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+            <div
+              className="relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-200 hover:-translate-y-1 hover:shadow-md group"
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-slate-600 text-sm">CV Access Used</p>
@@ -297,11 +302,19 @@ export default function Dashboard() {
                 </div>
                 <FileText className="w-12 h-12 text-green-100" />
               </div>
+              {/* Custom tooltip */}
+              <div className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">
+                <div className="bg-slate-800 text-white text-xs font-medium px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                  {summary.total_cv_usage.toLocaleString("en-IN")} CVs accessed
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800" />
+                </div>
+              </div>
             </div>
 
             <div
-              className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 cursor-pointer hover:border-orange-300 transition"
+              className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-orange-300"
               onClick={() => navigate("/invoices")}
+              title={`₹${summary.outstanding_invoices.toLocaleString("en-IN")} outstanding`}
             >
               <div className="flex items-center justify-between">
                 <div>
@@ -315,7 +328,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+            <div
+              className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+              title={`${summary.critical_teams} critical · ${summary.warning_teams} warning`}
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-slate-600 text-sm">Alert Teams</p>
