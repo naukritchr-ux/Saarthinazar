@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 
 from app.models.inventory_adjustment import InventoryAdjustment
+from app.models.report_upload import ReportUpload
 from app.models.team import Team
 from app.models.topup import TopUp
 from app.models.usage import SubUserUsage
@@ -129,6 +130,16 @@ def get_alerts(
     financial_year: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    latest_upload = (
+        db.query(ReportUpload)
+        .filter(
+            ReportUpload.financial_year == financial_year,
+            ReportUpload.status == "success",
+        )
+        .order_by(ReportUpload.created_at.desc())
+        .first()
+    )
+
     teams = (
         db.query(Team)
         .filter(Team.is_active.isnot(False))   # include active=True AND active=None (report-created teams)
@@ -180,6 +191,8 @@ def get_alerts(
             "overage_amount": overage_amount,
             "members": members,
             "message": "",
+            "range_start": latest_upload.range_start.date().isoformat() if latest_upload and latest_upload.range_start else None,
+            "range_end": latest_upload.range_end.date().isoformat() if latest_upload and latest_upload.range_end else None,
         })
 
     return alerts

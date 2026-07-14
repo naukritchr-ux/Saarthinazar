@@ -279,21 +279,6 @@ def preflight_check(financial_year: str = Query(...), db: Session = Depends(get_
         # ── Build rows for teams without a combined invoice yet ───────
         invoice_rows = []
 
-        # Licence fee row
-        if licence_fee > 0:
-            lf_sub = licence_fee
-            lf_gst = round(lf_sub * 0.18, 2)
-            lf_tot = round(lf_sub + lf_gst, 2)
-            lf_inv = next((i for i in team_invoices if i.invoice_type == "licence_fee"), None)
-            invoice_rows.append({
-                "type":      "licence_fee",
-                "label":     "Licence Fee",
-                "subtotal":  lf_sub,
-                "gst":       lf_gst,
-                "total":     lf_tot,
-                "generated": lf_inv is not None,
-                "invoice":   _inv_summary(lf_inv),
-            })
 
         # Topup rows — only when no combined invoice
         for ti in [i for i in team_invoices if i.invoice_type == "topup"]:
@@ -685,14 +670,6 @@ def _generate_for_team(team: Team, financial_year: str, db: Session) -> list:
     items: list[dict] = []
     section_notes: list[str] = []
 
-    if licence_fee > 0:
-        items.append({
-            "name":   "Annual Naukri Licence Fee",
-            "qty":    team.licences or 1,
-            "rate":   round(licence_fee / max(team.licences or 1, 1), 2),
-            "amount": licence_fee,
-        })
-        section_notes.append(f"Licence fee: {team.licences or 1} licence(s) × {team.join_period}")
 
     for tu in topup_rows:
         if (tu.cv_topup or 0) > 0:
