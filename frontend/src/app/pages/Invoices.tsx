@@ -702,8 +702,8 @@ export default function Invoices() {
       )}
       {genMsg && (
         <div className={`p-3.5 rounded-xl text-sm border mb-5 ${genMsg.includes("✅") ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-            : genMsg.includes("Generating") ? "bg-violet-50 text-violet-800 border-violet-200"
-              : "bg-rose-50 text-rose-800 border-rose-200"}`}>
+          : genMsg.includes("Generating") ? "bg-violet-50 text-violet-800 border-violet-200"
+            : "bg-rose-50 text-rose-800 border-rose-200"}`}>
           {genMsg}
         </div>
       )}
@@ -746,12 +746,12 @@ export default function Invoices() {
               <button
                 key={s} onClick={() => setFilter(s)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition capitalize ${filter === s
-                    ? s === "pending" ? "bg-amber-500 text-white border-amber-500"
-                      : s === "unpaid" ? "bg-rose-600 text-white border-rose-600"
-                        : s === "partial" ? "bg-orange-500 text-white border-orange-500"
-                          : s === "paid" ? "bg-emerald-600 text-white border-emerald-600"
-                            : "bg-violet-600 text-white border-violet-600"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                  ? s === "pending" ? "bg-amber-500 text-white border-amber-500"
+                    : s === "unpaid" ? "bg-rose-600 text-white border-rose-600"
+                      : s === "partial" ? "bg-orange-500 text-white border-orange-500"
+                        : s === "paid" ? "bg-emerald-600 text-white border-emerald-600"
+                          : "bg-violet-600 text-white border-violet-600"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                   }`}
               >
                 {s}

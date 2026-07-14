@@ -58,16 +58,16 @@ function formatFriendlyDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
-  
+
   const day = date.getDate();
   const month = date.toLocaleString("en-US", { month: "long" });
   const year = date.getFullYear();
-  
+
   let suffix = "th";
   if (day === 1 || day === 21 || day === 31) suffix = "st";
   else if (day === 2 || day === 22) suffix = "nd";
   else if (day === 3 || day === 23) suffix = "rd";
-  
+
   return `${day}${suffix} ${month} ${year}`;
 }
 
@@ -323,8 +323,8 @@ export default function Alerts() {
           >
             {financialYears.length > 0
               ? financialYears.map((y) => (
-                  <option key={y.id} value={y.label}>FY {y.label}</option>
-                ))
+                <option key={y.id} value={y.label}>FY {y.label}</option>
+              ))
               : <option value={financialYear}>FY {financialYear}</option>}
           </select>
           <button
@@ -542,21 +542,19 @@ export default function Alerts() {
               <div className="flex gap-2 mb-4">
                 <button
                   onClick={() => setPreviewTab("whatsapp")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    previewTab === "whatsapp"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${previewTab === "whatsapp"
                       ? "bg-green-600 text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                    }`}
                 >
                   <MessageSquare className="w-4 h-4" /> WhatsApp
                 </button>
                 <button
                   onClick={() => setPreviewTab("email")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    previewTab === "email"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${previewTab === "email"
                       ? "bg-blue-600 text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                    }`}
                 >
                   <Mail className="w-4 h-4" /> Email
                 </button>
