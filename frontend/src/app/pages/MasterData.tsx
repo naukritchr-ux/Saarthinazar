@@ -296,17 +296,7 @@ function TeamEditModal({ team, pricing, financialYear, onClose, onSave }: TeamEd
               ))}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-purple-700 mb-1">Licence Fee (₹)</label>
-                <input
-                  type="number"
-                  value={raw.licence_fee}
-                  disabled={!form.manual_override}
-                  onChange={e => setRawField("licence_fee", e.target.value)}
-                  className={numInpPurple}
-                />
-              </div>
+            <div className="mt-3">
               <div>
                 <label className="block text-xs text-purple-700 mb-1">Cost Share (₹)</label>
                 <input
@@ -454,13 +444,7 @@ function PricingRow({ item, financialYear, setPricing, onSave, onRefreshPricing 
           ))}
         </select>
       </td>
-      <td className="px-5 py-3 text-sm">
-        {editing
-          ? <input type="number" value={raw.licence_fee} disabled={item.is_locked}
-              className={numInp + " w-28"}
-              onChange={e => setNum("licence_fee", e.target.value)} />
-          : <span className={`font-medium ${item.is_locked ? "text-slate-500" : ""}`}>{fmtCurrency(item.licence_fee)}</span>}
-      </td>
+
       {(["cv_limit", "nvites_limit", "jobs_limit"] as const).map(key => (
         <td key={key} className={`px-5 py-3 text-sm ${item.is_locked ? "text-slate-500" : ""}`}>
           {editing
@@ -701,7 +685,7 @@ export default function MasterData() {
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Period", "Partner Type", "Price + GST", "CV Access", "NVites", "Job Postings", "Lock Status", "Last Updated", ""].map(h => (
+                {["Period", "Partner Type", "CV Access", "NVites", "Job Postings", "Lock Status", "Last Updated", ""].map(h => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide last:text-right last:pr-10">{h}</th>
                 ))}
               </tr>
@@ -719,7 +703,7 @@ export default function MasterData() {
               ))}
               {pricing.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-5 py-10 text-center text-slate-400 text-sm">No pricing matrices defined for this year.</td>
+                  <td colSpan={8} className="px-5 py-10 text-center text-slate-400 text-sm">No pricing matrices defined for this year.</td>
                 </tr>
               )}
             </tbody>
@@ -777,7 +761,6 @@ export default function MasterData() {
                 <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-700"
                   onClick={() => toggleSort("join_period")}>Period <SortIcon field="join_period" /></th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">CV / NVites / Jobs</th>
-                <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Licence Fee</th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Status</th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Last Updated</th>
                 <th className="px-5 py-3" />
@@ -807,7 +790,6 @@ export default function MasterData() {
                       </p>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-sm font-medium text-slate-900">{fmtCurrency(team.licence_fee)}</td>
                   <td className="px-5 py-3"><StatusBadge active={team.is_active} /></td>
                   <td className="px-5 py-3 text-xs text-slate-400">
                     {team.updated_at ? new Date(team.updated_at).toLocaleDateString("en-IN") : "—"}

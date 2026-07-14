@@ -48,16 +48,16 @@ interface TeamEntry {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function statusColor(s: string) {
-  if (s === "paid")    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  if (s === "paid") return "bg-emerald-100 text-emerald-700 border border-emerald-200";
   if (s === "partial") return "bg-amber-100 text-amber-700 border border-amber-200";
   return "bg-rose-100 text-rose-700 border border-rose-200";
 }
 
 function typeColor(t: string) {
   if (t === "licence_fee") return "bg-sky-100 text-sky-700 border border-sky-200";
-  if (t === "overage")     return "bg-orange-100 text-orange-700 border border-orange-200";
-  if (t === "topup")       return "bg-violet-100 text-violet-700 border border-violet-200";
-  if (t === "combined")    return "bg-indigo-100 text-indigo-700 border border-indigo-200";
+  if (t === "overage") return "bg-orange-100 text-orange-700 border border-orange-200";
+  if (t === "topup") return "bg-violet-100 text-violet-700 border border-violet-200";
+  if (t === "combined") return "bg-indigo-100 text-indigo-700 border border-indigo-200";
   return "bg-slate-100 text-slate-600 border border-slate-200";
 }
 
@@ -122,17 +122,17 @@ function StatusBadge({ inv, onUpdated }: {
   inv: InvSummary;
   onUpdated: (id: number, status: string, paid: number) => void;
 }) {
-  const [open, setOpen]               = useState(false);
-  const [saving, setSaving]           = useState(false);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showPartial, setShowPartial] = useState(false);
-  const [pos, setPos]                 = useState({ top: 0, left: 0 });
-  const btnRef                        = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   const openMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!btnRef.current) return;
-    const rect      = btnRef.current.getBoundingClientRect();
-    const menuH     = 120; // approx height of 3 items
+    const rect = btnRef.current.getBoundingClientRect();
+    const menuH = 120; // approx height of 3 items
     const spaceBelow = window.innerHeight - rect.bottom;
     const top = spaceBelow > menuH ? rect.bottom + 6 : rect.top - menuH - 6;
     setPos({ top, left: rect.left });
@@ -211,12 +211,12 @@ function EditContactModal({ team, onSaved, onClose }: {
   onClose: () => void;
 }) {
   const [form, setForm] = useState({
-    partner_name:  team.partner_name,
+    partner_name: team.partner_name,
     partner_email: team.partner_email,
-    phone:         team.phone,
-    address:       team.address,
-    gstin:         team.gstin,
-    state_code:    team.state_code,
+    phone: team.phone,
+    address: team.address,
+    gstin: team.gstin,
+    state_code: team.state_code,
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -306,10 +306,10 @@ function TeamCard({
   onEdit: () => void;
   onInvUpdated: (teamId: number, invId: number, status: string, paid: number) => void;
 }) {
-  const pendingRows   = team.invoice_rows.filter(r => !r.generated);
+  const pendingRows = team.invoice_rows.filter(r => !r.generated);
   const generatedRows = team.invoice_rows.filter(r => r.generated && r.invoice);
-  const hasMissing    = team.missing_fields.length > 0;
-  const allPaid       = generatedRows.length > 0 && generatedRows.every(r => r.invoice?.payment_status === "paid");
+  const hasMissing = team.missing_fields.length > 0;
+  const allPaid = generatedRows.length > 0 && generatedRows.every(r => r.invoice?.payment_status === "paid");
 
   const accentClass = team.has_pending
     ? "border-l-4 border-l-amber-400"
@@ -436,9 +436,9 @@ function TeamCard({
               <tbody>
                 {/* Generated invoice rows */}
                 {generatedRows.map((row, idx) => {
-                  const inv   = row.invoice!;
+                  const inv = row.invoice!;
                   const total = inv.total_amount || row.total;
-                  const outs  = Math.max(0, total - (inv.paid_amount || 0));
+                  const outs = Math.max(0, total - (inv.paid_amount || 0));
                   return (
                     <tr key={idx} className="border-t border-slate-50 hover:bg-slate-50/60 transition">
                       <td className="px-5 py-3">
@@ -517,9 +517,9 @@ function TeamCard({
 export default function Invoices() {
   const { financialYear, setFinancialYear, financialYears } = useFY();
 
-  const [teams, setTeams]     = useState<TeamEntry[]>([]);
+  const [teams, setTeams] = useState<TeamEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState("");
+  const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "pending" | "unpaid" | "partial" | "paid">("all");
@@ -527,8 +527,8 @@ export default function Invoices() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const [generatingTeam, setGeneratingTeam] = useState<number | null>(null);
-  const [generatingAll, setGeneratingAll]   = useState(false);
-  const [genMsg, setGenMsg]                 = useState("");
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [genMsg, setGenMsg] = useState("");
 
   const [editingTeam, setEditingTeam] = useState<TeamEntry | null>(null);
 
@@ -625,26 +625,26 @@ export default function Invoices() {
     t.invoice_rows.forEach(r => {
       if (!r.generated || !r.invoice) return;
       const total = r.invoice.total_amount || r.total;
-      const paid  = r.invoice.paid_amount || 0;
-      acc.total       += total;
-      acc.paid        += paid;
+      const paid = r.invoice.paid_amount || 0;
+      acc.total += total;
+      acc.paid += paid;
       acc.outstanding += Math.max(0, total - paid);
-      if (r.invoice.payment_status === "unpaid")  acc.unpaid++;
+      if (r.invoice.payment_status === "unpaid") acc.unpaid++;
       if (r.invoice.payment_status === "partial") acc.partial++;
-      if (r.invoice.payment_status === "paid")    acc.paidCount++;
+      if (r.invoice.payment_status === "paid") acc.paidCount++;
     });
     return acc;
   }, { total: 0, paid: 0, outstanding: 0, unpaid: 0, partial: 0, paidCount: 0 });
 
-  const baseList = teams;
+  const baseList = teams.filter(t => t.invoice_rows.length > 0);
 
   const filtered = baseList.filter(t => {
     const q = search.toLowerCase();
     if (q && !t.team_name.toLowerCase().includes(q) && !t.partner_name.toLowerCase().includes(q)) return false;
     if (filter === "pending") return t.has_pending;
-    if (filter === "unpaid")  return t.invoice_rows.some(r => r.invoice?.payment_status === "unpaid");
+    if (filter === "unpaid") return t.invoice_rows.some(r => r.invoice?.payment_status === "unpaid");
     if (filter === "partial") return t.invoice_rows.some(r => r.invoice?.payment_status === "partial");
-    if (filter === "paid")    return t.invoice_rows.length > 0 && t.invoice_rows.every(r => !r.generated || r.invoice?.payment_status === "paid");
+    if (filter === "paid") return t.invoice_rows.length > 0 && t.invoice_rows.every(r => !r.generated || r.invoice?.payment_status === "paid");
     return true;
   });
 
@@ -701,10 +701,9 @@ export default function Invoices() {
         </div>
       )}
       {genMsg && (
-        <div className={`p-3.5 rounded-xl text-sm border mb-5 ${
-          genMsg.includes("✅") ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-          : genMsg.includes("Generating") ? "bg-violet-50 text-violet-800 border-violet-200"
-          : "bg-rose-50 text-rose-800 border-rose-200"}`}>
+        <div className={`p-3.5 rounded-xl text-sm border mb-5 ${genMsg.includes("✅") ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+            : genMsg.includes("Generating") ? "bg-violet-50 text-violet-800 border-violet-200"
+              : "bg-rose-50 text-rose-800 border-rose-200"}`}>
           {genMsg}
         </div>
       )}
@@ -713,10 +712,10 @@ export default function Invoices() {
       {!loading && teams.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {[
-            { label: "Total Invoiced",  value: fmt(stats.total),       icon: IndianRupee,  color: "text-slate-700",   bg: "bg-slate-100" },
-            { label: "Amount Paid",     value: fmt(stats.paid),        icon: BadgeCheck,   color: "text-emerald-700", bg: "bg-emerald-100" },
-            { label: "Outstanding",     value: fmt(stats.outstanding), icon: Banknote,     color: "text-rose-700",    bg: "bg-rose-100" },
-            { label: "Unpaid Invoices", value: String(stats.unpaid),   icon: AlertCircle,  color: "text-amber-700",   bg: "bg-amber-100" },
+            { label: "Total Invoiced", value: fmt(stats.total), icon: IndianRupee, color: "text-slate-700", bg: "bg-slate-100" },
+            { label: "Amount Paid", value: fmt(stats.paid), icon: BadgeCheck, color: "text-emerald-700", bg: "bg-emerald-100" },
+            { label: "Outstanding", value: fmt(stats.outstanding), icon: Banknote, color: "text-rose-700", bg: "bg-rose-100" },
+            { label: "Unpaid Invoices", value: String(stats.unpaid), icon: AlertCircle, color: "text-amber-700", bg: "bg-amber-100" },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex items-center gap-4">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.bg}`}>
@@ -746,15 +745,14 @@ export default function Invoices() {
             {(["all", "pending", "unpaid", "partial", "paid"] as const).map(s => (
               <button
                 key={s} onClick={() => setFilter(s)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition capitalize ${
-                  filter === s
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition capitalize ${filter === s
                     ? s === "pending" ? "bg-amber-500 text-white border-amber-500"
-                    : s === "unpaid"  ? "bg-rose-600 text-white border-rose-600"
-                    : s === "partial" ? "bg-orange-500 text-white border-orange-500"
-                    : s === "paid"    ? "bg-emerald-600 text-white border-emerald-600"
-                    : "bg-violet-600 text-white border-violet-600"
+                      : s === "unpaid" ? "bg-rose-600 text-white border-rose-600"
+                        : s === "partial" ? "bg-orange-500 text-white border-orange-500"
+                          : s === "paid" ? "bg-emerald-600 text-white border-emerald-600"
+                            : "bg-violet-600 text-white border-violet-600"
                     : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                }`}
+                  }`}
               >
                 {s}
               </button>

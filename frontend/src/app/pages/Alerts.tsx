@@ -41,6 +41,8 @@ interface AlertTeam {
   members: Member[];
   message: string;
   financial_year: string;
+  range_start?: string | null;
+  range_end?: string | null;
 }
 
 // =====================================================
@@ -50,6 +52,23 @@ interface AlertTeam {
 function getFirstName(fullName: string): string {
   if (!fullName) return "";
   return fullName.trim().split(/\s+/)[0];
+}
+
+function formatFriendlyDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  
+  const day = date.getDate();
+  const month = date.toLocaleString("en-US", { month: "long" });
+  const year = date.getFullYear();
+  
+  let suffix = "th";
+  if (day === 1 || day === 21 || day === 31) suffix = "st";
+  else if (day === 2 || day === 22) suffix = "nd";
+  else if (day === 3 || day === 23) suffix = "rd";
+  
+  return `${day}${suffix} ${month} ${year}`;
 }
 
 function formatFYDuration(financialYear: string): string {
@@ -65,8 +84,12 @@ function getFYEndDate(financialYear: string): string {
 
 function buildUsageMessage(a: AlertTeam): string {
   const firstName = getFirstName(a.partner_name || a.team_name);
-  const duration = formatFYDuration(a.financial_year || "");
-  const endDate = getFYEndDate(a.financial_year || "");
+  const duration = a.range_start && a.range_end
+    ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
+    : formatFYDuration(a.financial_year || "");
+  const endDate = a.range_end
+    ? formatFriendlyDate(a.range_end)
+    : getFYEndDate(a.financial_year || "");
 
   const licences = a.licence_count || 1;
   const cvBase = a.cv_limit_base || 0;
