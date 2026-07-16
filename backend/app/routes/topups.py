@@ -236,3 +236,37 @@ def create_topup(
         },
         "latest_invoice": latest_invoice,
     }
+# =====================================================
+# DELETE TOPUP
+# =====================================================
+
+@router.delete("/{topup_id}")
+def delete_topup(
+    topup_id: int,
+    db: Session = Depends(get_db)
+):
+    topup = db.query(TopUp).filter(TopUp.id == topup_id).first()
+
+    if not topup:
+        return {"status": "error", "message": "Top-up not found"}
+
+    add_audit(
+        db,
+        topup.added_by,
+        "delete_topup",
+        "topup",
+        topup.id,
+        {
+            "team_name": topup.team_name,
+            "cv_topup": topup.cv_topup,
+            "nvites_topup": topup.nvites_topup,
+            "jobs_topup": topup.jobs_topup,
+            "amount": topup.amount,
+            "financial_year": topup.financial_year,
+        },
+    )
+
+    db.delete(topup)
+    db.commit()
+
+    return {"status": "success", "message": "Top-up deleted successfully"}
