@@ -222,7 +222,6 @@ export default function TeamUsage() {
         case "nvites_pct": av = a.usage_percent.nvites; bv = b.usage_percent.nvites; break;
         case "jobs_pct": av = a.usage_percent.jobs;  bv = b.usage_percent.jobs;  break;
         case "cv_bal":  av = a.total_limits.cv - a.usage.cv;    bv = b.total_limits.cv - b.usage.cv;   break;
-        case "outstanding": av = a.outstanding_invoice; bv = b.outstanding_invoice; break;
         case "licences": av = a.licence_count; bv = b.licence_count; break;
         default:        av = a.name.toLowerCase(); bv = b.name.toLowerCase();
       }
@@ -409,13 +408,6 @@ export default function TeamUsage() {
                     Jobs Usage {sortField === "jobs_pct" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Status</th>
-                  {/* Sortable: Outstanding Invoice */}
-                  <th
-                    className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide cursor-pointer hover:text-slate-800 select-none"
-                    onClick={() => toggleSort("outstanding")}
-                  >
-                    Outstanding {sortField === "outstanding" ? (sortAsc ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />) : null}
-                  </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Action</th>
                 </tr>
               </thead>
@@ -478,16 +470,6 @@ export default function TeamUsage() {
                         <td className="px-6 py-4"><StatusBadge status={team.status} /></td>
 
                         <td className="px-6 py-4">
-                          {team.outstanding_invoice > 0 ? (
-                            <span className="text-orange-600 font-medium text-sm">
-                              ₹{team.outstanding_invoice.toLocaleString()}
-                            </span>
-                          ) : (
-                            <span className="text-green-600 text-sm">—</span>
-                          )}
-                        </td>
-
-                        <td className="px-6 py-4">
                           <button
                             onClick={() => navigate(`/topups?teamId=${team.id}`)}
                             className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition text-xs font-medium flex items-center gap-1"
@@ -500,7 +482,7 @@ export default function TeamUsage() {
                       {/* SUBUSERS EXPANDED */}
                       {expanded && (
                         <tr key={`${team.id}-sub`}>
-                          <td colSpan={10} className="px-6 py-4 bg-slate-50">
+                          <td colSpan={9} className="px-6 py-4 bg-slate-50">
                             <div className="ml-10">
                               <h4 className="font-medium mb-3 flex items-center gap-2 text-sm">
                                 <AlertCircle className="w-4 h-4 text-purple-600" />

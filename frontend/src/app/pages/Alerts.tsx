@@ -5,7 +5,7 @@ import {
 import { useFY } from "../context/FYContext";
 import API from "../services/api";
 import {
-  Send, MessageSquare, Mail, X,
+  Send, MessageSquare, Mail, X, Copy, Check,
   RefreshCw, AlertCircle, CheckCircle, Search, ChevronUp, ChevronDown,
 } from "lucide-react";
 
@@ -28,6 +28,12 @@ interface AlertTeam {
   cv_limit_base: number;
   topup_cv_total: number;
   topup_cv_list: number[];
+  nvites_limit_base: number;
+  topup_nvites_total: number;
+  topup_nvites_list: number[];
+  jobs_limit_base: number;
+  topup_jobs_total: number;
+  topup_jobs_list: number[];
   cv_usage: number;
   cv_limit: number;
   nvites_usage: number;
@@ -82,7 +88,13 @@ function getFYEndDate(financialYear: string): string {
   return match ? `31st March ${match[1]}` : "31st March";
 }
 
-function buildUsageMessage(a: AlertTeam): string {
+type MetricKey = "cv" | "nvites" | "jobs";
+
+// Rate/block rules used in Kajal's manual billing messages
+const CV_RATE = 10;
+const CV_BLOCK = 500;
+
+function buildCvMessage(a: AlertTeam): string {
   const firstName = getFirstName(a.partner_name || a.team_name);
   const duration = a.range_start && a.range_end
     ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
@@ -99,31 +111,111 @@ function buildUsageMessage(a: AlertTeam): string {
   const totalPurchase = baseTotal + topupTotal;
   const totalCvUsage = a.cv_usage;
   const overUse = Math.max(0, totalCvUsage - totalPurchase);
-  const finalCost = overUse * 10;
 
   const hasMembers = a.members && a.members.length > 0;
 
   const lines: string[] = [
     `Dear ${firstName}`,
-    `Kindly Note the CV Access Usage for the Below Mentioned ID/ID's Under you Partnership.`,
+    `Kindly Note the *CV Access* Usage for the Below Mentioned ID/ID's Under you Partnership. `,
+    `*Duration: ${duration}*`,
+  ];
+
+  if (hasMembers) {
+    for (const m of a.members) {
+      lines.push(`*Username*: ${m.email}`);
+      lines.push(`*Usage*: ${(m.cv_usage ?? 0).toLocaleString("en-IN")}`);
+    }
+    lines.push(`*Total Usage*: ${totalCvUsage.toLocaleString("en-IN")}`);
+  } else {
+    lines.push(`*Username*: ${a.partner_email || ""}`);
+    lines.push(`*Usage*: ${totalCvUsage.toLocaleString("en-IN")}`);
+  }
+
+  if (licences > 1) {
+    lines.push(`*Initial Purchase*: ${cvBase} x ${licences} = Rs ${baseTotal.toLocaleString("en-IN")}`);
+  } else {
+    lines.push(`*Initial Purchase*: ${cvBase.toLocaleString("en-IN")}`);
+  }
+
+  if (topupList.length > 1) {
+    lines.push(`*Extra Purchase*: ${topupList.join("+")}= ${topupTotal.toLocaleString("en-IN")}`);
+  } else if (topupList.length === 1) {
+    lines.push(`*Extra Purchase*: ${topupList[0]}`);
+  } else {
+    lines.push(`*Extra Purchase*: 0`);
+  }
+
+  lines.push(`*Total Purchase*:  ${totalPurchase.toLocaleString("en-IN")}`);
+
+  if (overUse > 0) {
+    const additionalNeeded = Math.ceil(overUse / CV_BLOCK) * CV_BLOCK;
+    const availableUntilFYEnd = additionalNeeded - overUse;
+    const cost = additionalNeeded * CV_RATE;
+    lines.push(`*Over Use*: ${overUse.toLocaleString("en-IN")}`);
+    lines.push(`*Additional (Needs to Be Purchased)*: ${additionalNeeded.toLocaleString("en-IN")}`);
+    lines.push(`*Available Inventory Until ${endDate}*:  ${availableUntilFYEnd.toLocaleString("en-IN")}`);
+    lines.push(`*Cost*: Rs ${cost.toLocaleString("en-IN")} + GST. `);
+  }
+
+  lines.push(
+    `Kindly confirm the same so that the invoice can be issued from our end. `,
+    `Please note that the above can be verified in the report section of your Naukri Account. We will also be generating a report after *${endDate}*. `,
+    `Regards `,
+    `Kajal Khamkar`,
+    `Executive Assistant `,
+    `Talent Corner`,
+  );
+
+  return lines.join("\n");
+}
+
+// Rate/block rules mirror backend BILLING_RULES (naukri_rules.py) for nvites & jobs
+const NVITES_RATE = 0.5;
+const NVITES_BLOCK = 10000;
+const JOBS_RATE = 50;
+const JOBS_BLOCK = 100;
+
+function buildNvitesMessage(a: AlertTeam): string {
+  const firstName = getFirstName(a.partner_name || a.team_name);
+  const duration = a.range_start && a.range_end
+    ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
+    : formatFYDuration(a.financial_year || "");
+  const endDate = a.range_end
+    ? formatFriendlyDate(a.range_end)
+    : getFYEndDate(a.financial_year || "");
+
+  const licences = a.licence_count || 1;
+  const nvitesBase = a.nvites_limit_base || 0;
+  const topupList: number[] = a.topup_nvites_list || [];
+  const topupTotal = a.topup_nvites_total || 0;
+  const baseTotal = nvitesBase * licences;
+  const totalPurchase = baseTotal + topupTotal;
+  const totalNvitesUsage = a.nvites_usage;
+  const overUse = Math.max(0, totalNvitesUsage - totalPurchase);
+
+  const hasMembers = a.members && a.members.length > 0;
+
+  const lines: string[] = [
+    `Dear ${firstName}`,
+    `Kindly Note the Mass Mail (Nvite) Usage for the Below Mentioned ID/ID's Under your Partnership.`,
     `Duration: ${duration}`,
   ];
 
   if (hasMembers) {
     for (const m of a.members) {
       lines.push(`Username: ${m.email}`);
-      lines.push(`Usage: ${(m.cv_usage ?? 0).toLocaleString("en-IN")}`);
+      lines.push(`Usage: ${(m.nvites_usage ?? 0).toLocaleString("en-IN")}`);
     }
-    lines.push(`Total Usage: ${totalCvUsage.toLocaleString("en-IN")}`);
+    lines.push(`Total Usage: ${totalNvitesUsage.toLocaleString("en-IN")}`);
   } else {
     lines.push(`Username: ${a.partner_email || ""}`);
-    lines.push(`Usage: ${totalCvUsage.toLocaleString("en-IN")}`);
+    lines.push(`Usage: ${totalNvitesUsage.toLocaleString("en-IN")}`);
   }
 
   if (licences > 1) {
-    lines.push(`Initial Purchase: ${cvBase} x ${licences} = Rs ${baseTotal.toLocaleString("en-IN")}`);
+    lines.push(`Initial Purchase: ${nvitesBase} x ${licences} = ${baseTotal.toLocaleString("en-IN")}`);
   } else {
-    lines.push(`Initial Purchase: ${cvBase}`);
+    lines.push(`Initial Purchase: ${nvitesBase.toLocaleString("en-IN")}`);
   }
 
   if (topupList.length > 1) {
@@ -131,33 +223,79 @@ function buildUsageMessage(a: AlertTeam): string {
   } else if (topupList.length === 1) {
     lines.push(`Extra Purchase: ${topupList[0]}`);
   } else {
-    lines.push(`Extra Purchase: `);
+    lines.push(`Extra Purchase: 0`);
   }
 
   lines.push(`Total Purchase: ${totalPurchase.toLocaleString("en-IN")}`);
 
   if (overUse > 0) {
+    const additionalNeeded = Math.ceil(overUse / NVITES_BLOCK) * NVITES_BLOCK;
+    const availableUntilFYEnd = additionalNeeded - overUse;
+    const cost = additionalNeeded * NVITES_RATE;
     lines.push(`Over Use: ${overUse.toLocaleString("en-IN")}`);
-    lines.push(`Final Cost of Over Usage Until ${endDate}: Rs ${finalCost.toLocaleString("en-IN")}+ GST. `);
+    lines.push(`Additional (Needs to Be Purchased): ${additionalNeeded.toLocaleString("en-IN")}`);
+    lines.push(`Available Inventory Until ${endDate}: ${availableUntilFYEnd.toLocaleString("en-IN")}`);
+    lines.push(`Cost: Rs ${cost.toLocaleString("en-IN")} + GST. `);
   }
 
   lines.push(
     `Kindly confirm the same so that the invoice can be issued from our end. `,
-    `Please note that the above can be verified in the report section of your Naukri Account. `,
+    `Please note that the above can be verified in the report section of your Naukri Account. We will also be generating a report after ${endDate}. `,
     `Regards `,
     `Kajal Khamkar`,
-    `Executive Assistant`,
+    `Executive Assistant `,
+    `Talent Corner`,
   );
 
   return lines.join("\n");
 }
 
-function buildWhatsAppMessage(a: AlertTeam): string {
-  return buildUsageMessage(a);
+function buildJobsMessage(a: AlertTeam): string {
+  const firstName = getFirstName(a.partner_name || a.team_name);
+  const endDate = a.range_end
+    ? formatFriendlyDate(a.range_end)
+    : getFYEndDate(a.financial_year || "");
+
+  const jobsLimit = a.jobs_limit || 0;
+  const jobsUsage = a.jobs_usage || 0;
+  const overUse = Math.max(0, jobsUsage - jobsLimit);
+  const billedBlock = overUse > 0 ? Math.ceil(overUse / JOBS_BLOCK) * JOBS_BLOCK : 0;
+  const cost = billedBlock * JOBS_RATE;
+
+  const lines: string[] = [
+    `Dear ${firstName}  (ID: ${a.partner_email || ""})`,
+    `I hope you are doing well. `,
+    `Please Note Your Naukri Job Posting `,
+    `Number of Job Posting : ${jobsUsage.toLocaleString("en-IN")} (Earlier Limit: ${jobsLimit.toLocaleString("en-IN")} )`,
+    `The Usage can be checked by you as will in the reports section of the Dashboard. `,
+  ];
+
+  if (overUse > 0) {
+    lines.push(
+      `Please purchase extra inventory. Cost of the same is Rs ${cost.toLocaleString("en-IN")}  for ${billedBlock.toLocaleString("en-IN")}   Additional Job Posting Validity will be Until ${endDate}. Kindly confirm so that the invoice can be sent to you. `
+    );
+  }
+
+  lines.push(
+    `Regards`,
+    `Ms. Kajal Khamkar (EA To Rashesh Doshi)`,
+  );
+
+  return lines.join("\n");
 }
 
-function buildEmailBody(a: AlertTeam): string {
-  return buildUsageMessage(a);
+function buildUsageMessage(a: AlertTeam, metric: MetricKey = "cv"): string {
+  if (metric === "nvites") return buildNvitesMessage(a);
+  if (metric === "jobs") return buildJobsMessage(a);
+  return buildCvMessage(a);
+}
+
+function buildWhatsAppMessage(a: AlertTeam, metric: MetricKey = "cv"): string {
+  return buildUsageMessage(a, metric);
+}
+
+function buildEmailBody(a: AlertTeam, metric: MetricKey = "cv"): string {
+  return buildUsageMessage(a, metric);
 }
 
 function AlertBadge({ type }: { type: string }) {
@@ -198,7 +336,9 @@ export default function Alerts() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
 
   const [previewAlert, setPreviewAlert] = useState<AlertTeam | null>(null);
+  const [previewMetric, setPreviewMetric] = useState<MetricKey>("cv");
   const [previewTab, setPreviewTab] = useState<"whatsapp" | "email">("whatsapp");
+  const [copied, setCopied] = useState(false);
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [sentIds, setSentIds] = useState<Set<number>>(new Set());
 
@@ -283,16 +423,33 @@ export default function Alerts() {
     }
   };
 
-  const openWhatsApp = (a: AlertTeam) => {
-    const msg = encodeURIComponent(buildWhatsAppMessage(a));
+  const openWhatsApp = (a: AlertTeam, metric: MetricKey = previewMetric) => {
+    const msg = encodeURIComponent(buildWhatsAppMessage(a, metric));
     window.open(`https://wa.me/?text=${msg}`, "_blank");
   };
 
-  const openEmail = (a: AlertTeam) => {
+  const openEmail = (a: AlertTeam, metric: MetricKey = previewMetric) => {
     const subject = encodeURIComponent(`Naukri.com Usage Alert — ${a.team_name} | FY ${financialYear}`);
-    const body = encodeURIComponent(buildEmailBody(a));
+    const body = encodeURIComponent(buildEmailBody(a, metric));
     const to = encodeURIComponent(a.partner_email || "");
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
+  };
+
+  const openPreview = (a: AlertTeam, metric: MetricKey) => {
+    setPreviewAlert(a);
+    setPreviewMetric(metric);
+    setPreviewTab("whatsapp");
+    setCopied(false);
+  };
+
+  const copyMessage = async (a: AlertTeam, metric: MetricKey) => {
+    try {
+      await navigator.clipboard.writeText(buildUsageMessage(a, metric));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Could not copy to clipboard.");
+    }
   };
 
   // ===================================================
@@ -462,19 +619,19 @@ export default function Alerts() {
 
                 <div className="flex gap-2 flex-wrap">
                   <button
-                    onClick={() => { setPreviewAlert(a); setPreviewTab("whatsapp"); }}
+                    onClick={() => openPreview(a, "cv")}
                     className="px-3 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm"
                   >
                     Preview
                   </button>
                   <button
-                    onClick={() => openWhatsApp(a)}
+                    onClick={() => openWhatsApp(a, "cv")}
                     className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm"
                   >
                     <MessageSquare className="w-4 h-4" /> WhatsApp
                   </button>
                   <button
-                    onClick={() => openEmail(a)}
+                    onClick={() => openEmail(a, "cv")}
                     className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm"
                   >
                     <Mail className="w-4 h-4" /> Email
@@ -495,11 +652,17 @@ export default function Alerts() {
               {/* USAGE GRID */}
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  { label: "CV Access", used: a.cv_usage, limit: a.cv_limit, rem: a.cv_remaining },
-                  { label: "NVites", used: a.nvites_usage, limit: a.nvites_limit, rem: a.nvites_remaining },
-                  { label: "Job Postings", used: a.jobs_usage, limit: a.jobs_limit, rem: a.jobs_remaining },
-                ].map(({ label, used, limit, rem }) => (
-                  <div key={label} className="bg-white rounded-lg p-3 border border-slate-200">
+                  { key: "cv" as MetricKey, label: "CV Access", used: a.cv_usage, limit: a.cv_limit, rem: a.cv_remaining },
+                  { key: "nvites" as MetricKey, label: "NVites", used: a.nvites_usage, limit: a.nvites_limit, rem: a.nvites_remaining },
+                  { key: "jobs" as MetricKey, label: "Job Postings", used: a.jobs_usage, limit: a.jobs_limit, rem: a.jobs_remaining },
+                ].map(({ key, label, used, limit, rem }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => openPreview(a, key)}
+                    className="text-left bg-white rounded-lg p-3 border border-slate-200 hover:border-purple-400 hover:shadow-sm transition cursor-pointer"
+                    title={`Preview ${label} alert message`}
+                  >
                     <p className="text-xs text-slate-600 mb-1">{label}</p>
                     <p className="font-medium text-sm">
                       {(used ?? 0).toLocaleString()} / {(limit ?? 0).toLocaleString()}
@@ -507,7 +670,7 @@ export default function Alerts() {
                     <p className="text-xs text-slate-500 mt-0.5">
                       {pct(used ?? 0, limit ?? 0)}% used · {(rem ?? 0).toLocaleString()} remaining
                     </p>
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -538,45 +701,79 @@ export default function Alerts() {
             </div>
 
             <div className="p-5">
+              {/* METRIC SWITCHER */}
+              <div className="flex gap-2 mb-3">
+                {([
+                  { key: "cv", label: "CV Access" },
+                  { key: "nvites", label: "NVites" },
+                  { key: "jobs", label: "Job Postings" },
+                ] as { key: MetricKey; label: string }[]).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => { setPreviewMetric(key); setCopied(false); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      previewMetric === key
+                        ? "bg-purple-600 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               {/* TABS */}
               <div className="flex gap-2 mb-4">
                 <button
                   onClick={() => setPreviewTab("whatsapp")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${previewTab === "whatsapp"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    previewTab === "whatsapp"
                       ? "bg-green-600 text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
+                  }`}
                 >
                   <MessageSquare className="w-4 h-4" /> WhatsApp
                 </button>
                 <button
                   onClick={() => setPreviewTab("email")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${previewTab === "email"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    previewTab === "email"
                       ? "bg-blue-600 text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
+                  }`}
                 >
                   <Mail className="w-4 h-4" /> Email
+                </button>
+                <button
+                  onClick={() => copyMessage(previewAlert, previewMetric)}
+                  className={`ml-auto flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition border ${
+                    copied
+                      ? "bg-green-50 text-green-700 border-green-300"
+                      : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copied ? "Copied!" : "Copy"}
                 </button>
               </div>
 
               {/* MESSAGE CONTENT */}
               <pre className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">
                 {previewTab === "whatsapp"
-                  ? buildWhatsAppMessage(previewAlert)
-                  : buildEmailBody(previewAlert)}
+                  ? buildWhatsAppMessage(previewAlert, previewMetric)
+                  : buildEmailBody(previewAlert, previewMetric)}
               </pre>
 
               {/* SEND BUTTONS */}
               <div className="flex gap-3 mt-4">
                 <button
-                  onClick={() => openWhatsApp(previewAlert)}
+                  onClick={() => openWhatsApp(previewAlert, previewMetric)}
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
                 >
                   <MessageSquare className="w-4 h-4" /> Open WhatsApp
                 </button>
                 <button
-                  onClick={() => openEmail(previewAlert)}
+                  onClick={() => openEmail(previewAlert, previewMetric)}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
                 >
                   <Mail className="w-4 h-4" /> Open Email

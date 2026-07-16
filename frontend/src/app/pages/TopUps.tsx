@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Clock, RefreshCw, AlertCircle } from 'lucide-react';
+import { Plus, Clock, RefreshCw, AlertCircle, Trash2 } from 'lucide-react';
 import { useFY } from '../context/FYContext';
 
 import API from "../services/api";
@@ -45,6 +45,7 @@ export default function TopUps() {
   // -- History state --
   const [history, setHistory] = useState<TopUpHistory[]>([]);
   const [histLoading, setHistLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // -- Team current limits (for preview) --
   const [teamLimits, setTeamLimits] = useState<{ cv: number; nvites: number; jobs: number } | null>(null);
@@ -102,7 +103,30 @@ export default function TopUps() {
       .catch((err) => console.error('Error loading history:', err))
       .finally(() => setHistLoading(false));
   };
+// ===================================================
+// Delete top-up
+// ===================================================
+const handleDeleteTopup = async (item: TopUpHistory) => {
+  const confirmed = window.confirm(
+    `Delete this top-up of Rs. ${(item.amount || 0).toLocaleString('en-IN')} for ${item.team_name}? This cannot be undone.`
+  );
+  if (!confirmed) return;
 
+  setDeletingId(item.id);
+  try {
+    const res = await fetch(`${API}/topups/${item.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.status === 'success') {
+      setHistory((prev) => prev.filter((h) => h.id !== item.id));
+    } else {
+      setSubmitMsg({ type: 'error', text: '❌ ' + (data.message || 'Failed to delete top-up.') });
+    }
+  } catch (err: any) {
+    setSubmitMsg({ type: 'error', text: '❌ ' + (err.message || 'Server error while deleting.') });
+  } finally {
+    setDeletingId(null);
+  }
+};
   useEffect(() => { fetchHistory(); }, [financialYear]);
 
   // ===================================================
@@ -361,7 +385,20 @@ export default function TopUps() {
                           : '-'}
                       </p>
                     </div>
-                    <span className="text-lg font-medium text-purple-600">Rs. {(item.amount || 0).toLocaleString('en-IN')}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg font-medium text-purple-600">Rs. {(item.amount || 0).toLocaleString('en-IN')}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTopup(item)}
+                        disabled={deletingId === item.id}
+                        className="text-slate-400 hover:text-red-600 transition disabled:opacity-50"
+                        title="Delete top-up"
+                      >
+                        {deletingId === item.id
+                          ? <RefreshCw className="w-4 h-4 animate-spin" />
+                          : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex gap-3 text-sm flex-wrap">
                     {(item.cv_topup || 0) > 0 && (
