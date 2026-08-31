@@ -197,7 +197,8 @@ export default function UploadReports() {
       formData.append("overwrite_existing", overwrite ? "true" : "false");
       formData.append("resdex_report", resdexFile);
       formData.append("job_posting_report", jobPostingFile);
-
+      formData.append("overwrite_existing", "true");
+      
       const response = await fetch(
         `${API}/reports/upload`,
         {
