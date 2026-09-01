@@ -99,9 +99,7 @@ function buildCvMessage(a: AlertTeam): string {
   const duration = a.range_start && a.range_end
     ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
     : formatFYDuration(a.financial_year || "");
-  const endDate = a.range_end
-    ? formatFriendlyDate(a.range_end)
-    : getFYEndDate(a.financial_year || "");
+  const endDate = getFYEndDate(a.financial_year || "");
 
   const licences = a.licence_count || 1;
   const cvBase = a.cv_limit_base || 0;
@@ -180,9 +178,7 @@ function buildNvitesMessage(a: AlertTeam): string {
   const duration = a.range_start && a.range_end
     ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
     : formatFYDuration(a.financial_year || "");
-  const endDate = a.range_end
-    ? formatFriendlyDate(a.range_end)
-    : getFYEndDate(a.financial_year || "");
+  const endDate = getFYEndDate(a.financial_year || "");
 
   const licences = a.licence_count || 1;
   const nvitesBase = a.nvites_limit_base || 0;
@@ -254,9 +250,7 @@ function buildJobsMessage(a: AlertTeam): string {
   const duration = a.range_start && a.range_end
     ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
     : formatFYDuration(a.financial_year || "");
-  const endDate = a.range_end
-    ? formatFriendlyDate(a.range_end)
-    : getFYEndDate(a.financial_year || "");
+  const endDate = getFYEndDate(a.financial_year || "");
 
   const jobsLimit = a.jobs_limit || 0;
   const totalJobsUsage = a.jobs_usage || 0;
