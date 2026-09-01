@@ -92,7 +92,7 @@ type MetricKey = "cv" | "nvites" | "jobs";
 
 // Rate/block rules used in Kajal's manual billing messages
 const CV_RATE = 10;
-const CV_BLOCK = 500;
+const CV_BLOCK = 1000;
 
 function buildCvMessage(a: AlertTeam): string {
   const firstName = getFirstName(a.partner_name || a.team_name);
@@ -249,34 +249,52 @@ function buildNvitesMessage(a: AlertTeam): string {
 
   return lines.join("\n");
 }
-
 function buildJobsMessage(a: AlertTeam): string {
   const firstName = getFirstName(a.partner_name || a.team_name);
+  const duration = a.range_start && a.range_end
+    ? `${formatFriendlyDate(a.range_start)}-${formatFriendlyDate(a.range_end)}`
+    : formatFYDuration(a.financial_year || "");
   const endDate = a.range_end
     ? formatFriendlyDate(a.range_end)
     : getFYEndDate(a.financial_year || "");
 
   const jobsLimit = a.jobs_limit || 0;
-  const jobsUsage = a.jobs_usage || 0;
-  const overUse = Math.max(0, jobsUsage - jobsLimit);
+  const totalJobsUsage = a.jobs_usage || 0;
+  const overUse = Math.max(0, totalJobsUsage - jobsLimit);
   const billedBlock = overUse > 0 ? Math.ceil(overUse / JOBS_BLOCK) * JOBS_BLOCK : 0;
   const cost = billedBlock * JOBS_RATE;
 
+  const hasMembers = a.members && a.members.length > 0;
+
   const lines: string[] = [
-    `Dear ${firstName}  (ID: ${a.partner_email || ""})`,
-    `I hope you are doing well. `,
-    `Please Note Your Naukri Job Posting `,
-    `Number of Job Posting : ${jobsUsage.toLocaleString("en-IN")} (Earlier Limit: ${jobsLimit.toLocaleString("en-IN")} )`,
-    `The Usage can be checked by you as will in the reports section of the Dashboard. `,
+    `Dear ${firstName}`,
+    `Kindly Note the Naukri Job Posting Usage for the Below Mentioned ID/ID's Under your Partnership.`,
+    `Duration: ${duration}`,
   ];
 
+  if (hasMembers) {
+    for (const m of a.members) {
+      lines.push(`Username: ${m.email}`);
+      lines.push(`Usage: ${(m.jobs_usage ?? 0).toLocaleString("en-IN")}`);
+    }
+    lines.push(`Total Usage: ${totalJobsUsage.toLocaleString("en-IN")}`);
+  } else {
+    lines.push(`Username: ${a.partner_email || ""}`);
+    lines.push(`Usage: ${totalJobsUsage.toLocaleString("en-IN")}`);
+  }
+
+  lines.push(`Job Posting Limit: ${jobsLimit.toLocaleString("en-IN")}`);
+
   if (overUse > 0) {
-    lines.push(
-      `Please purchase extra inventory. Cost of the same is Rs ${cost.toLocaleString("en-IN")}  for ${billedBlock.toLocaleString("en-IN")}   Additional Job Posting Validity will be Until ${endDate}. Kindly confirm so that the invoice can be sent to you. `
-    );
+    lines.push(`Over Use: ${overUse.toLocaleString("en-IN")}`);
+    lines.push(`Additional (Needs to Be Purchased): ${billedBlock.toLocaleString("en-IN")}`);
+    lines.push(`Additional Job Posting Validity Until ${endDate}`);
+    lines.push(`Cost: Rs ${cost.toLocaleString("en-IN")} + GST.`);
   }
 
   lines.push(
+    `Kindly confirm the same so that the invoice can be issued from our end.`,
+    `Please note that the above can be verified in the report section of your Naukri Account. We will also be generating a report after ${endDate}.`,
     `Regards`,
     `Ms. Kajal Khamkar (EA To Rashesh Doshi)`,
   );
