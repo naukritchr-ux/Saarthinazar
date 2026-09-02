@@ -752,8 +752,11 @@ def parse_job_posting_report(filepath: str) -> tuple[tuple[date | None, date | N
     df = df[df["email"].str.contains("@", na=False)]
 
     job_col = next(
-        (c for c in df.columns if "total" in str(c).lower() and "job" in str(c).lower()),
-        df.columns[-1],
+        (c for c in df.columns if "post" in str(c).lower() and "job" in str(c).lower() and "expense" in str(c).lower()),
+        next(
+            (c for c in df.columns if "job" in str(c).lower() and "expense" in str(c).lower() and "total" not in str(c).lower()),
+            df.columns[-1],
+        ),
     )
     df["jobs_usage"] = pd.to_numeric(df[job_col], errors="coerce").fillna(0).astype(int)
 

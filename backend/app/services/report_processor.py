@@ -64,13 +64,15 @@ class ReportProcessor:
     )
 
     JOB_ALIASES = (
-        "total job expense",
+        "jobs post expense",
+        "job post expense",
+        "job posting expense",
         "job postings",
         "jobs",
         "jobs used",
         "posting usage",
+        "total job expense",
     )
-
     # =====================================================
     # INTERNAL — HTML CELL EXTRACTOR
     # =====================================================

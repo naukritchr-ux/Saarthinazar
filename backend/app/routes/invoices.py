@@ -284,7 +284,7 @@ def preflight_check(financial_year: str = Query(...), db: Session = Depends(get_
         for ti in [i for i in team_invoices if i.invoice_type == "topup"]:
             invoice_rows.append({
                 "type":      "topup",
-                "label":     "Top-Up",
+                "label":     _topup_metric_label(ti),
                 "subtotal":  float(ti.amount or 0),
                 "gst":       float(ti.gst_amount or 0),
                 "total":     _effective_total(ti),
@@ -301,9 +301,14 @@ def preflight_check(financial_year: str = Query(...), db: Session = Depends(get_
             ov_gst   = round(ov_sub * 0.18, 2)
             ov_tot   = round(ov_sub + ov_gst, 2)
             ov_inv   = next((i for i in team_invoices if i.invoice_type == "overage"), None)
+            overage_metrics = []
+            if cv_ov > 0:     overage_metrics.append("CV Access")
+            if nvites_ov > 0: overage_metrics.append("NVites")
+            if jobs_ov > 0:   overage_metrics.append("Job Posting")
+            overage_label = f"Usage Overage ({' + '.join(overage_metrics)})" if overage_metrics else "Usage Overage"
             invoice_rows.append({
                 "type":      "overage",
-                "label":     "Usage Overage",
+                "label":     overage_label,
                 "subtotal":  ov_sub,
                 "gst":       ov_gst,
                 "total":     ov_tot,
@@ -784,8 +789,24 @@ def _inv_summary(inv) -> dict | None:
         "paid_amount":    float(inv.paid_amount or 0),
         "total_amount":   _effective_total(inv),
     }
-
-
+def _topup_metric_label(inv) -> str:
+    """Build 'Top-Up (CV Access + NVites)' style label from the invoice's stored line items."""
+    try:
+        items = json.loads(inv.items_json) if inv.items_json else []
+    except Exception:
+        items = []
+    found = set()
+    for it in items:
+        name = str(it.get("name", "")).lower()
+        if "cv" in name:
+            found.add("CV Access")
+        if "nvite" in name:
+            found.add("NVites")
+        if "job" in name:
+            found.add("Job Posting")
+    order = ["CV Access", "NVites", "Job Posting"]
+    metrics = [m for m in order if m in found]
+    return f"Top-Up ({' + '.join(metrics)})" if metrics else "Top-Up"
 def _missing_fields(team: Team) -> list[str]:
     missing = []
     if not (getattr(team, "phone",         "") or "").strip(): missing.append("Phone")
