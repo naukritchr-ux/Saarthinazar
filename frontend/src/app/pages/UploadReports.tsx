@@ -17,7 +17,6 @@ import {
   AlertTriangle,
   Calendar,
   Loader2,
-  AlertCircle,
 } from "lucide-react";
 
 interface UploadRecord {
@@ -73,13 +72,8 @@ export default function UploadReports() {
   const [duplicatePending, setDuplicatePending] =
     useState(false);
 
-  // Non-Monday warning (shown inline, not blocking)
-  const [notMondayWarning, setNotMondayWarning] =
-    useState<string | null>(null);
 
-  // Weekly lock override state
-  const [weeklyLockPending, setWeeklyLockPending] =
-    useState(false);
+
 
   const resdexInputRef =
     useRef<HTMLInputElement | null>(null);
@@ -89,20 +83,7 @@ export default function UploadReports() {
 
   const { username: loggedInUser } = useRole();
 
-  // =====================================================
-  // CHECK IF TODAY IS MONDAY
-  // =====================================================
 
-  useEffect(() => {
-    const today = new Date();
-    const isMonday = today.getDay() === 1; // 0=Sun, 1=Mon
-    if (!isMonday) {
-      const dayName = today.toLocaleDateString("en-IN", { weekday: "long" });
-      setNotMondayWarning(
-        `Today is ${dayName}, not Monday. Reports are scheduled for upload every Monday. You can still upload if needed, but please confirm this is intentional.`
-      );
-    }
-  }, []);
 
   // =====================================================
   // FETCH HISTORY
@@ -263,11 +244,7 @@ export default function UploadReports() {
 
         let detail: string = data.detail || data.message || "Upload failed.";
 
-        // Detect weekly lock error specifically
-        if (detail.includes("Upload already done this week") || detail.includes("Next upload window")) {
-          setWeeklyLockPending(true);
-          setValidationError(detail);
-        } else if (detail.includes("must start from") && detail.includes("Resdex")) {
+        if (detail.includes("must start from") && detail.includes("Resdex")) {
           setValidationError(
             `Wrong financial year selected. This Resdex report starts from a different April. ` +
             `Please select the correct financial year in the dropdown above, or re-download the report from Naukri for the selected year.`
@@ -346,22 +323,7 @@ export default function UploadReports() {
         </select>
       </div>
 
-      {/* NOT-MONDAY WARNING */}
-      {notMondayWarning && (
-        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-4 mb-6 flex items-start gap-3">
-          <AlertCircle className="text-yellow-600 w-5 h-5 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-yellow-900 font-medium">Not a Monday</p>
-            <p className="text-yellow-800 text-sm">{notMondayWarning}</p>
-          </div>
-          <button
-            onClick={() => setNotMondayWarning(null)}
-            className="text-yellow-600 hover:text-yellow-900 transition"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+
 
       {/* INFO */}
       <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-6 flex items-center gap-3">
@@ -377,16 +339,16 @@ export default function UploadReports() {
       {/* ERROR / DUPLICATE CONFIRMATION */}
       {validationError && (
         <div className={`border rounded-xl p-4 mb-6 ${
-          duplicatePending || weeklyLockPending
+          duplicatePending
             ? "bg-amber-50 border-amber-300"
             : "bg-red-50 border-red-200"
         }`}>
           <div className="flex items-start gap-3">
             <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-              duplicatePending || weeklyLockPending ? "text-amber-600" : "text-red-600"
+              duplicatePending ? "text-amber-600" : "text-red-600"
             }`} />
             <div className="flex-1">
-              <p className={duplicatePending || weeklyLockPending ? "text-amber-900" : "text-red-900"}>
+              <p className={duplicatePending ? "text-amber-900" : "text-red-900"}>
                 {validationError}
               </p>
 
@@ -409,24 +371,7 @@ export default function UploadReports() {
                 </div>
               )}
 
-              {/* Weekly lock override button */}
-              {weeklyLockPending && (
-                <div className="flex gap-3 mt-3">
-                  <button
-                    onClick={() => { setWeeklyLockPending(false); doUpload(true); }}
-                    disabled={uploading}
-                    className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 transition disabled:opacity-50"
-                  >
-                    {uploading ? "Processing..." : "Upload Anyway (Override Weekly Lock)"}
-                  </button>
-                  <button
-                    onClick={() => { setWeeklyLockPending(false); setValidationError(null); }}
-                    className="px-4 py-2 bg-white border border-amber-300 text-amber-800 rounded-lg text-sm hover:bg-amber-50 transition"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
+
             </div>
           </div>
         </div>
