@@ -291,6 +291,7 @@ function TeamCard({
   isGenerating,
   generatingAll,
   financialYear,
+  filter,
   onToggle,
   onGenerate,
   onEdit,
@@ -301,15 +302,26 @@ function TeamCard({
   isGenerating: boolean;
   generatingAll: boolean;
   financialYear: string;
+  filter: "all" | "pending" | "unpaid" | "partial" | "paid";
   onToggle: () => void;
   onGenerate: () => void;
   onEdit: () => void;
   onInvUpdated: (teamId: number, invId: number, status: string, paid: number) => void;
 }) {
-  const pendingRows = team.invoice_rows.filter(r => !r.generated);
-  const generatedRows = team.invoice_rows.filter(r => r.generated && r.invoice);
+  // Full sets — used for header badges (has_pending / outstanding / allPaid summary)
+  const allPendingRows = team.invoice_rows.filter(r => !r.generated);
+  const allGeneratedRows = team.invoice_rows.filter(r => r.generated && r.invoice);
   const hasMissing = team.missing_fields.length > 0;
-  const allPaid = generatedRows.length > 0 && generatedRows.every(r => r.invoice?.payment_status === "paid");
+  const allPaid = allGeneratedRows.length > 0 && allGeneratedRows.every(r => r.invoice?.payment_status === "paid");
+
+  // Rows actually shown in the table — respect the active status filter
+  const pendingRows = filter === "all" || filter === "pending" ? allPendingRows : [];
+  const generatedRows =
+    filter === "all"
+      ? allGeneratedRows
+      : filter === "pending"
+        ? []
+        : allGeneratedRows.filter(r => r.invoice?.payment_status === filter);
 
   const accentClass = team.has_pending
     ? "border-l-4 border-l-amber-400"
@@ -359,7 +371,7 @@ function TeamCard({
           {team.has_pending && (
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              {pendingRows.length} pending
+              {allPendingRows.length} pending
             </span>
           )}
           {team.outstanding > 0 && (
@@ -500,6 +512,13 @@ function TeamCard({
                   <tr>
                     <td colSpan={7} className="px-5 py-6 text-center text-xs text-slate-400">
                       No billable items for this team in FY {financialYear}
+                    </td>
+                  </tr>
+                )}
+                {team.invoice_rows.length > 0 && pendingRows.length === 0 && generatedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-6 text-center text-xs text-slate-400">
+                      No {filter} invoices for this team
                     </td>
                   </tr>
                 )}
@@ -644,7 +663,7 @@ export default function Invoices() {
     if (filter === "pending") return t.has_pending;
     if (filter === "unpaid") return t.invoice_rows.some(r => r.invoice?.payment_status === "unpaid");
     if (filter === "partial") return t.invoice_rows.some(r => r.invoice?.payment_status === "partial");
-    if (filter === "paid") return t.invoice_rows.length > 0 && t.invoice_rows.every(r => !r.generated || r.invoice?.payment_status === "paid");
+    if (filter === "paid") return t.invoice_rows.some(r => r.generated && r.invoice?.payment_status === "paid");
     return true;
   });
 
@@ -821,6 +840,7 @@ export default function Invoices() {
               isGenerating={generatingTeam === team.team_id}
               generatingAll={generatingAll}
               financialYear={financialYear}
+              filter={filter}
               onToggle={() => toggle(team.team_id)}
               onGenerate={() => generateTeam(team)}
               onEdit={() => setEditingTeam(team)}

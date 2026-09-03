@@ -25,6 +25,18 @@ interface TopUpHistory {
   added_by: string;
 }
 
+interface InvoiceItem {
+  id: number;
+  invoice_number: string;
+  partner_name: string;
+  total_amount: number;
+  paid_amount: number;
+  payment_status: string;
+  invoice_type: string;
+  invoice_date: string | null;
+  pdf_path: string | null;
+}
+
 export default function TopUps() {
   const { financialYear, setFinancialYear, financialYears } = useFY();
 
@@ -46,6 +58,10 @@ export default function TopUps() {
   const [history, setHistory] = useState<TopUpHistory[]>([]);
   const [histLoading, setHistLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // -- Generated invoices (from Invoices page) --
+  const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
+  const [invLoading, setInvLoading] = useState(true);
 
   // -- Team current limits (for preview) --
   const [teamLimits, setTeamLimits] = useState<{ cv: number; nvites: number; jobs: number } | null>(null);
@@ -127,7 +143,22 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
     setDeletingId(null);
   }
 };
-  useEffect(() => { fetchHistory(); }, [financialYear]);
+  const fetchInvoices = () => {
+    if (!financialYear) return;
+    setInvLoading(true);
+    fetch(`${API}/invoices?financial_year=${encodeURIComponent(financialYear)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load invoices (${r.status})`);
+        return r.json();
+      })
+      .then((data) => {
+        if (Array.isArray(data)) setInvoices(data);
+      })
+      .catch((err) => console.error('Error loading invoices:', err))
+      .finally(() => setInvLoading(false));
+  };
+
+  useEffect(() => { fetchHistory(); fetchInvoices(); }, [financialYear]);
 
   // ===================================================
   // Set team limits when team is selected
@@ -417,6 +448,70 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* GENERATED INVOICES (synced from Invoices page) */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 mt-6">
+        <h2 className="text-xl font-medium mb-6 flex items-center gap-2">
+          <Clock className="w-5 h-5 text-purple-600" />
+          Generated Invoices - FY {financialYear}
+        </h2>
+        {invLoading ? (
+          <div className="flex justify-center py-12">
+            <RefreshCw className="w-6 h-6 animate-spin text-purple-600" />
+          </div>
+        ) : invoices.length === 0 ? (
+          <div className="flex items-center justify-center py-12 text-slate-400 text-sm gap-2">
+            <AlertCircle className="w-5 h-5" /> No invoices generated yet for FY {financialYear}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <p className="font-medium">{inv.partner_name}</p>
+                    <p className="text-sm text-slate-600 font-mono">{inv.invoice_number}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {inv.invoice_date
+                        ? new Date(inv.invoice_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '-'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-lg font-medium text-purple-600 block">
+                      Rs. {(inv.total_amount || 0).toLocaleString('en-IN')}
+                    </span>
+                    <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                      inv.payment_status === 'paid'
+                        ? 'bg-green-100 text-green-700'
+                        : inv.payment_status === 'partial'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-700'
+                    }`}>
+                      {inv.payment_status}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-3 text-sm flex-wrap items-center">
+                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded capitalize">
+                    {inv.invoice_type}
+                  </span>
+                                  {inv.pdf_path && (
+                    <a
+                      href={`${API}/invoices/${inv.id}/download`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-purple-600 hover:underline"
+                    >
+                      Download PDF
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
