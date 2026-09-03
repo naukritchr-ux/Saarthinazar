@@ -231,40 +231,7 @@ def upload_reports(
             detail="Please upload both reports together.",
         )
 
-    # =========================================================================
-    # WEEKLY UPLOAD LOCK
-    # One successful upload per calendar week (Mon–Sun) per financial year.
-    # Uploading on any day (not just Monday) still consumes the weekly slot.
-    # =========================================================================
 
-    if not overwrite_existing:
-        today = date.today()
-        week_start = today - timedelta(days=today.weekday())   # Monday
-        week_end   = week_start + timedelta(days=6)            # Sunday
-        next_monday = week_start + timedelta(days=7)
-
-        existing_this_week = (
-            db.query(ReportUpload)
-            .filter(
-                ReportUpload.financial_year == financial_year,
-                ReportUpload.status == "success",
-                func.date(ReportUpload.created_at) >= week_start,
-                func.date(ReportUpload.created_at) <= week_end,
-            )
-            .first()
-        )
-
-        if existing_this_week:
-            upload_day = existing_this_week.created_at.strftime("%A, %d %b %Y")
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Upload already done this week (uploaded on {upload_day}). "
-                    f"Only one upload is allowed per week regardless of the day. "
-                    f"Next upload window opens on Monday, "
-                    f"{next_monday.strftime('%d %b %Y')}."
-                ),
-            )
 
     # =========================================================================
     # SAVE FILES
