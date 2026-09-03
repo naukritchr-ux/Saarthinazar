@@ -328,6 +328,31 @@ function pct(u: number, l: number) {
   return l > 0 ? Math.round((u / l) * 100) : 0;
 }
 
+function metricColorClasses(percent: number) {
+  if (percent >= 100) {
+    return {
+      card: "bg-red-50 border-red-300 hover:border-red-400",
+      label: "text-red-700",
+      value: "text-red-900",
+      sub: "text-red-600",
+    };
+  }
+  if (percent >= 80) {
+    return {
+      card: "bg-orange-50 border-orange-300 hover:border-orange-400",
+      label: "text-orange-700",
+      value: "text-orange-900",
+      sub: "text-orange-600",
+    };
+  }
+  return {
+    card: "bg-green-50 border-green-300 hover:border-green-400",
+    label: "text-green-700",
+    value: "text-green-900",
+    sub: "text-green-600",
+  };
+}
+
 // =====================================================
 // MAIN
 // =====================================================
@@ -667,23 +692,27 @@ export default function Alerts() {
                   { key: "cv" as MetricKey, label: "CV Access", used: a.cv_usage, limit: a.cv_limit, rem: a.cv_remaining },
                   { key: "nvites" as MetricKey, label: "NVites", used: a.nvites_usage, limit: a.nvites_limit, rem: a.nvites_remaining },
                   { key: "jobs" as MetricKey, label: "Job Postings", used: a.jobs_usage, limit: a.jobs_limit, rem: a.jobs_remaining },
-                ].map(({ key, label, used, limit, rem }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => openPreview(a, key)}
-                    className="text-left bg-white rounded-lg p-3 border border-slate-200 hover:border-purple-400 hover:shadow-sm transition cursor-pointer"
-                    title={`Preview ${label} alert message`}
-                  >
-                    <p className="text-xs text-slate-600 mb-1">{label}</p>
-                    <p className="font-medium text-sm">
-                      {(used ?? 0).toLocaleString()} / {(limit ?? 0).toLocaleString()}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {pct(used ?? 0, limit ?? 0)}% used · {(rem ?? 0).toLocaleString()} remaining
-                    </p>
-                  </button>
-                ))}
+                ].map(({ key, label, used, limit, rem }) => {
+                  const usagePct = pct(used ?? 0, limit ?? 0);
+                  const colors = metricColorClasses(usagePct);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => openPreview(a, key)}
+                      className={`text-left rounded-lg p-3 border hover:shadow-sm transition cursor-pointer ${colors.card}`}
+                      title={`Preview ${label} alert message`}
+                    >
+                      <p className={`text-xs mb-1 ${colors.label}`}>{label}</p>
+                      <p className={`font-medium text-sm ${colors.value}`}>
+                        {(used ?? 0).toLocaleString()} / {(limit ?? 0).toLocaleString()}
+                      </p>
+                      <p className={`text-xs mt-0.5 ${colors.sub}`}>
+                        {usagePct}% used · {(rem ?? 0).toLocaleString()} remaining
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* OVERAGE */}
