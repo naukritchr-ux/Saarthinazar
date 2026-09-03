@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Clock, RefreshCw, AlertCircle, Trash2 } from 'lucide-react';
+import { Plus, Clock, RefreshCw, AlertCircle } from 'lucide-react';
 import { useFY } from '../context/FYContext';
 
 import API from "../services/api";
@@ -13,17 +13,6 @@ interface Team {
   total_limits?: { cv: number; nvites: number; jobs: number };
 }
 
-interface TopUpHistory {
-  id: number;
-  team_name: string;
-  cv_topup: number;
-  nvites_topup: number;
-  jobs_topup: number;
-  amount: number;
-  financial_year: string;
-  purchase_date: string | null;
-  added_by: string;
-}
 
 interface InvoiceItem {
   id: number;
@@ -54,10 +43,7 @@ export default function TopUps() {
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // -- History state --
-  const [history, setHistory] = useState<TopUpHistory[]>([]);
-  const [histLoading, setHistLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+
 
   // -- Generated invoices (from Invoices page) --
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
@@ -100,49 +86,7 @@ export default function TopUps() {
       .finally(() => setTeamsLoading(false));
   }, [financialYear]);
 
-  // ===================================================
-  // Fetch top-up history filtered by FY
-  // ===================================================
-  const fetchHistory = () => {
-    if (!financialYear) return;
-    setHistLoading(true);
-    fetch(`${API}/topups/?financial_year=${encodeURIComponent(financialYear)}`)
-      .then((r) => {
-        if (!r.ok) {
-          throw new Error(`Failed to load history (${r.status})`);
-        }
-        return r.json();
-      })
-      .then((data) => {
-        if (Array.isArray(data)) setHistory(data);
-      })
-      .catch((err) => console.error('Error loading history:', err))
-      .finally(() => setHistLoading(false));
-  };
-// ===================================================
-// Delete top-up
-// ===================================================
-const handleDeleteTopup = async (item: TopUpHistory) => {
-  const confirmed = window.confirm(
-    `Delete this top-up of Rs. ${(item.amount || 0).toLocaleString('en-IN')} for ${item.team_name}? This cannot be undone.`
-  );
-  if (!confirmed) return;
 
-  setDeletingId(item.id);
-  try {
-    const res = await fetch(`${API}/topups/${item.id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.status === 'success') {
-      setHistory((prev) => prev.filter((h) => h.id !== item.id));
-    } else {
-      setSubmitMsg({ type: 'error', text: '❌ ' + (data.message || 'Failed to delete top-up.') });
-    }
-  } catch (err: any) {
-    setSubmitMsg({ type: 'error', text: '❌ ' + (err.message || 'Server error while deleting.') });
-  } finally {
-    setDeletingId(null);
-  }
-};
   const fetchInvoices = () => {
     if (!financialYear) return;
     setInvLoading(true);
@@ -158,7 +102,7 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
       .finally(() => setInvLoading(false));
   };
 
-  useEffect(() => { fetchHistory(); fetchInvoices(); }, [financialYear]);
+  useEffect(() => { fetchInvoices(); }, [financialYear]);
 
   // ===================================================
   // Set team limits when team is selected
@@ -218,7 +162,7 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
         setDate(new Date().toISOString().split('T')[0]);
         setSelectedTeamId('');
         setTeamLimits(null);
-        fetchHistory();
+        fetchInvoices();
       } else {
         setSubmitMsg({ type: 'error', text: '❌ ' + (data.message || 'Failed to add top-up.') });
       }
@@ -257,7 +201,7 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {/* ADD TOP-UP FORM */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
           <h2 className="text-xl font-medium mb-6 flex items-center gap-2">
@@ -388,66 +332,6 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
             </button>
           </form>
         </div>
-
-        {/* HISTORY */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-          <h2 className="text-xl font-medium mb-6 flex items-center gap-2">
-            <Clock className="w-5 h-5 text-purple-600" />
-            Top-Up History - FY {financialYear}
-          </h2>
-          {histLoading ? (
-            <div className="flex justify-center py-12">
-              <RefreshCw className="w-6 h-6 animate-spin text-purple-600" />
-            </div>
-          ) : history.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-slate-400 text-sm gap-2">
-              <AlertCircle className="w-5 h-5" /> No top-ups recorded for FY {financialYear}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {history.map((item) => (
-                <div key={item.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <p className="font-medium">{item.team_name}</p>
-                      <p className="text-sm text-slate-600">
-                        {item.purchase_date
-                          ? new Date(item.purchase_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                          : '-'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg font-medium text-purple-600">Rs. {(item.amount || 0).toLocaleString('en-IN')}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTopup(item)}
-                        disabled={deletingId === item.id}
-                        className="text-slate-400 hover:text-red-600 transition disabled:opacity-50"
-                        title="Delete top-up"
-                      >
-                        {deletingId === item.id
-                          ? <RefreshCw className="w-4 h-4 animate-spin" />
-                          : <Trash2 className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex gap-3 text-sm flex-wrap">
-                    {(item.cv_topup || 0) > 0 && (
-                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">+{item.cv_topup.toLocaleString()} CV</span>
-                    )}
-                    {(item.nvites_topup || 0) > 0 && (
-                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">+{item.nvites_topup.toLocaleString()} NVites</span>
-                    )}
-                    {(item.jobs_topup || 0) > 0 && (
-                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">+{item.jobs_topup} Jobs</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-2">Added by {item.added_by}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* GENERATED INVOICES (synced from Invoices page) */}
@@ -466,7 +350,12 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
           </div>
         ) : (
           <div className="space-y-3">
-            {invoices.map((inv) => (
+            {[...invoices]
+              .sort((a, b) => {
+                const rank = (s: string) => (s === 'paid' ? 2 : s === 'partial' ? 1 : 0);
+                return rank(a.payment_status) - rank(b.payment_status);
+              })
+              .map((inv) => (
               <div key={inv.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition">
                 <div className="flex justify-between items-start mb-2">
                   <div>
@@ -509,7 +398,7 @@ const handleDeleteTopup = async (item: TopUpHistory) => {
                   )}
                 </div>
               </div>
-            ))}
+              ))}
           </div>
         )}
       </div>
