@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Clock, RefreshCw, AlertCircle } from 'lucide-react';
+import { Plus, Clock, RefreshCw, AlertCircle, Pencil, Check, X } from 'lucide-react';
 import { useFY } from '../context/FYContext';
 
 import API from "../services/api";
@@ -48,7 +48,8 @@ export default function TopUps() {
   // -- Generated invoices (from Invoices page) --
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
   const [invLoading, setInvLoading] = useState(true);
-
+const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
+const [editAmount, setEditAmount] = useState('');
   // -- Team current limits (for preview) --
   const [teamLimits, setTeamLimits] = useState<{ cv: number; nvites: number; jobs: number } | null>(null);
 
@@ -101,7 +102,29 @@ export default function TopUps() {
       .catch((err) => console.error('Error loading invoices:', err))
       .finally(() => setInvLoading(false));
   };
-
+const handleSaveAmount = async (invoiceId: number) => {
+  const newAmount = Number(editAmount);
+  if (!newAmount || newAmount <= 0) return;
+  try {
+    const res = await fetch(`${API}/invoices/${invoiceId}/amount`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ total_amount: newAmount }),
+    });
+    if (!res.ok) throw new Error('Failed to update amount');
+    const data = await res.json();
+    setInvoices((prev) =>
+      prev.map((inv) =>
+        inv.id === invoiceId ? { ...inv, total_amount: data.total_amount, pdf_path: data.pdf_path } : inv
+      )
+    );
+    setEditingInvoiceId(null);
+    setEditAmount('');
+  } catch (err) {
+    console.error('Error updating invoice amount:', err);
+    alert('Failed to update amount. Please try again.');
+  }
+};
   useEffect(() => { fetchInvoices(); }, [financialYear]);
 
   // ===================================================
@@ -368,9 +391,45 @@ export default function TopUps() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <span className="text-lg font-medium text-purple-600 block">
-                      Rs. {(inv.total_amount || 0).toLocaleString('en-IN')}
-                    </span>
+                    {editingInvoiceId === inv.id ? (
+                      <div className="flex items-center gap-1 justify-end mb-1">
+                        <span className="text-sm text-slate-500">Rs.</span>
+                        <input
+                          type="number"
+                          value={editAmount}
+                          onChange={(e) => setEditAmount(e.target.value)}
+                          autoFocus
+                          className="w-24 px-2 py-1 text-sm border border-purple-300 rounded-md text-right"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveAmount(inv.id)}
+                          className="p-1 text-green-600 hover:bg-green-50 rounded"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingInvoiceId(null); setEditAmount(''); }}
+                          className="p-1 text-slate-400 hover:bg-slate-100 rounded"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1">
+                        <span className="text-lg font-medium text-purple-600 block">
+                          Rs. {(inv.total_amount || 0).toLocaleString('en-IN')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingInvoiceId(inv.id); setEditAmount(String(inv.total_amount || '')); }}
+                          className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                     <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
                       inv.payment_status === 'paid'
                         ? 'bg-green-100 text-green-700'
