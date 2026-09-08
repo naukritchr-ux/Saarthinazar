@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Clock, RefreshCw, AlertCircle, Pencil, Check, X } from 'lucide-react';
+import { Plus, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Trash2 } from 'lucide-react';
 import { useFY } from '../context/FYContext';
 
 import API from "../services/api";
@@ -123,6 +123,17 @@ const handleSaveAmount = async (invoiceId: number) => {
   } catch (err) {
     console.error('Error updating invoice amount:', err);
     alert('Failed to update amount. Please try again.');
+  }
+};
+const handleDeleteInvoice = async (invoiceId: number) => {
+  if (!window.confirm('Delete this invoice? This cannot be undone.')) return;
+  try {
+    const res = await fetch(`${API}/invoices/${invoiceId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete invoice');
+    setInvoices((prev) => prev.filter((inv) => inv.id !== invoiceId));
+  } catch (err) {
+    console.error('Error deleting invoice:', err);
+    alert('Failed to delete invoice. Please try again.');
   }
 };
   useEffect(() => { fetchInvoices(); }, [financialYear]);
@@ -427,6 +438,13 @@ const handleSaveAmount = async (invoiceId: number) => {
                           className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded"
                         >
                           <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteInvoice(inv.id)}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     )}

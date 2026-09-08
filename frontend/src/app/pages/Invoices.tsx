@@ -296,6 +296,7 @@ function TeamCard({
   onGenerate,
   onEdit,
   onInvUpdated,
+  onAmountUpdated,
 }: {
   team: TeamEntry;
   isOpen: boolean;
@@ -307,9 +308,32 @@ function TeamCard({
   onGenerate: () => void;
   onEdit: () => void;
   onInvUpdated: (teamId: number, invId: number, status: string, paid: number) => void;
+  onAmountUpdated: (teamId: number, invId: number, newTotal: number) => void;
 }) {
   // Full sets — used for header badges (has_pending / outstanding / allPaid summary)
   const allPendingRows = team.invoice_rows.filter(r => !r.generated);
+    const [editingAmountId, setEditingAmountId] = useState<number | null>(null);
+  const [editAmountVal, setEditAmountVal] = useState("");
+
+  const saveAmount = async (invId: number) => {
+    const newTotal = Number(editAmountVal);
+    if (!newTotal || newTotal <= 0) return;
+    try {
+      const res = await fetch(`${API}/invoices/${invId}/amount`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ total_amount: newTotal }),
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        onAmountUpdated(team.team_id, invId, data.total_amount);
+      }
+    } catch { /* silent */ }
+    finally {
+      setEditingAmountId(null);
+      setEditAmountVal("");
+    }
+  };
   const allGeneratedRows = team.invoice_rows.filter(r => r.generated && r.invoice);
   const hasMissing = team.missing_fields.length > 0;
   const allPaid = allGeneratedRows.length > 0 && allGeneratedRows.every(r => r.invoice?.payment_status === "paid");
@@ -459,7 +483,35 @@ function TeamCard({
                         </span>
                       </td>
                       <td className="px-5 py-3 text-xs text-slate-500 font-mono">{inv.invoice_number}</td>
-                      <td className="px-5 py-3 text-right text-sm font-semibold text-slate-700">{fmt(total)}</td>
+                      <td className="px-5 py-3 text-right text-sm font-semibold text-slate-700">
+                        {editingAmountId === inv.id ? (
+                          <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="number"
+                              value={editAmountVal}
+                              onChange={(e) => setEditAmountVal(e.target.value)}
+                              autoFocus
+                              className="w-24 px-2 py-1 text-xs border border-violet-300 rounded-lg text-right"
+                            />
+                            <button onClick={() => saveAmount(inv.id)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => { setEditingAmountId(null); setEditAmountVal(""); }} className="p-1 text-slate-400 hover:bg-slate-100 rounded">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            {fmt(total)}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingAmountId(inv.id); setEditAmountVal(String(total)); }}
+                              className="p-1 text-slate-300 hover:text-violet-600 hover:bg-violet-50 rounded"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
                       <td className="px-5 py-3 text-right text-sm text-emerald-600 font-medium">{fmt(inv.paid_amount || 0)}</td>
                       <td className="px-5 py-3 text-right text-sm">
                         <span className={outs > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}>{fmt(outs)}</span>
@@ -586,7 +638,20 @@ export default function Invoices() {
       return { ...t, invoice_rows: rows, outstanding };
     }));
   };
-
+  const handleAmountUpdated = (teamId: number, invId: number, newTotal: number) => {
+    setTeams(prev => prev.map(t => {
+      if (t.team_id !== teamId) return t;
+      const rows = t.invoice_rows.map(r => {
+        if (!r.invoice || r.invoice.id !== invId) return r;
+        return { ...r, total: newTotal, invoice: { ...r.invoice, total_amount: newTotal } };
+      });
+      const outstanding = rows
+        .filter(r => r.generated && r.invoice && r.invoice.payment_status !== "paid")
+        .reduce((s, r) => s + Math.max(0, (r.invoice!.total_amount || r.total) - (r.invoice!.paid_amount || 0)), 0);
+      const total_amount = rows.reduce((s, r) => s + (r.invoice?.total_amount ?? r.total), 0);
+      return { ...t, invoice_rows: rows, outstanding, total_amount };
+    }));
+  };
   // ── Generate single team ─────────────────────────────────────────────────
   // Called after user confirms (or there are no missing fields)
   const doGenerateTeam = async (team: TeamEntry) => {
@@ -845,6 +910,7 @@ export default function Invoices() {
               onGenerate={() => generateTeam(team)}
               onEdit={() => setEditingTeam(team)}
               onInvUpdated={handleInvUpdated}
+              onAmountUpdated={handleAmountUpdated}
             />
           ))}
         </div>
