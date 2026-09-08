@@ -457,7 +457,45 @@ def update_payment_status(
         "payment_date":   invoice.payment_date.isoformat() if invoice.payment_date else None,
     }
 
+# ── AMOUNT UPDATE ─────────────────────────────────────────────────────────────
 
+@router.patch("/{invoice_id}/amount")
+def update_invoice_amount(invoice_id: int, payload: dict, db: Session = Depends(get_db)):
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    new_total = payload.get("total_amount")
+    if new_total is None:
+        raise HTTPException(status_code=400, detail="total_amount is required")
+
+    try:
+        new_total = float(new_total)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="total_amount must be a number")
+
+    if new_total <= 0:
+        raise HTTPException(status_code=400, detail="total_amount must be greater than 0")
+
+    invoice.total_amount = new_total
+    db.flush()
+
+    # Regenerate the PDF so the downloadable invoice reflects the new total
+    items = _parse_items(invoice)
+    try:
+        invoice.pdf_path = generate_invoice_pdf(invoice, items)
+    except Exception as exc:
+        print(f"[amount] PDF regen failed for invoice {invoice_id}: {exc}")
+
+    db.commit()
+    db.refresh(invoice)
+
+    return {
+        "status":       "success",
+        "id":           invoice.id,
+        "total_amount": float(invoice.total_amount or 0),
+        "pdf_path":     invoice.pdf_path,
+    }
 # ── DETAILS UPDATE (Bill-To fields) ──────────────────────────────────────────
 
 @router.patch("/{invoice_id}/details")
