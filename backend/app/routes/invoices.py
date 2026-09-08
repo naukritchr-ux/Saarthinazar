@@ -238,49 +238,25 @@ def preflight_check(financial_year: str = Query(...), db: Session = Depends(get_
         licence_fee   = float(team.licence_fee or 0)
         team_invoices = inv_by_team.get(team.id, [])
 
-        # ── If a COMBINED invoice exists, show it as a single row ─────
-        combined_inv = next((i for i in team_invoices if i.invoice_type == "combined"), None)
-        if combined_inv:
-            outstanding = (
-                max(0, _effective_total(combined_inv) - float(combined_inv.paid_amount or 0))
-                if combined_inv.payment_status != "paid" else 0
-            )
-            # Always include — even fully paid teams should appear in the list
-
-            missing = _missing_fields(team)
-            if missing:
-                warnings.append({"team_id": team.id, "team_name": team.name, "missing_fields": missing})
-
-            teams_preview.append({
-                "team_id":        team.id,
-                "team_name":      team.name,
-                "partner_name":   team.partner_name or "",
-                "partner_email":  team.partner_email or "",
-                "address":        team.address or "",
-                "phone":          team.phone or "",
-                "gstin":          team.gstin or "",
-                "state_code":     team.state_code or "",
-                "missing_fields": missing,
-                "invoice_rows": [{
-                    "type":      "combined",
-                    "label":     "Invoice (Licence + Topups + Overage)",
-                    "subtotal":  float(combined_inv.amount or 0),
-                    "gst":       float(combined_inv.gst_amount or 0),
-                    "total":     _effective_total(combined_inv),
-                    "generated": True,
-                    "invoice":   _inv_summary(combined_inv),
-                }],
-                "has_pending":  False,
-                "total_amount": _effective_total(combined_inv),
-                "outstanding":  outstanding,
-            })
-            continue
-
-        # ── Build rows for teams without a combined invoice yet ───────
+        # ── Build rows for the team: include EVERY generated invoice ────
+        # (a combined invoice AND any standalone topup invoices, if both
+        # exist) so the Invoices page and TopUps page always show the same
+        # underlying rows — marking one paid updates it everywhere.
         invoice_rows = []
 
+        combined_inv = next((i for i in team_invoices if i.invoice_type == "combined"), None)
+        if combined_inv:
+            invoice_rows.append({
+                "type":      "combined",
+                "label":     "Invoice (Licence + Topups + Overage)",
+                "subtotal":  float(combined_inv.amount or 0),
+                "gst":       float(combined_inv.gst_amount or 0),
+                "total":     _effective_total(combined_inv),
+                "generated": True,
+                "invoice":   _inv_summary(combined_inv),
+            })
 
-        # Topup rows — only when no combined invoice
+        # Topup rows — always shown, even alongside a combined invoice
         for ti in [i for i in team_invoices if i.invoice_type == "topup"]:
             invoice_rows.append({
                 "type":      "topup",
@@ -457,45 +433,7 @@ def update_payment_status(
         "payment_date":   invoice.payment_date.isoformat() if invoice.payment_date else None,
     }
 
-# ── AMOUNT UPDATE ─────────────────────────────────────────────────────────────
 
-@router.patch("/{invoice_id}/amount")
-def update_invoice_amount(invoice_id: int, payload: dict, db: Session = Depends(get_db)):
-    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-
-    new_total = payload.get("total_amount")
-    if new_total is None:
-        raise HTTPException(status_code=400, detail="total_amount is required")
-
-    try:
-        new_total = float(new_total)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="total_amount must be a number")
-
-    if new_total <= 0:
-        raise HTTPException(status_code=400, detail="total_amount must be greater than 0")
-
-    invoice.total_amount = new_total
-    db.flush()
-
-    # Regenerate the PDF so the downloadable invoice reflects the new total
-    items = _parse_items(invoice)
-    try:
-        invoice.pdf_path = generate_invoice_pdf(invoice, items)
-    except Exception as exc:
-        print(f"[amount] PDF regen failed for invoice {invoice_id}: {exc}")
-
-    db.commit()
-    db.refresh(invoice)
-
-    return {
-        "status":       "success",
-        "id":           invoice.id,
-        "total_amount": float(invoice.total_amount or 0),
-        "pdf_path":     invoice.pdf_path,
-    }
 # ── DETAILS UPDATE (Bill-To fields) ──────────────────────────────────────────
 
 @router.patch("/{invoice_id}/details")
@@ -698,17 +636,6 @@ def _generate_for_team(team: Team, financial_year: str, db: Session) -> list:
         Invoice.invoice_type   == "combined",
     ).first()
 
-    if existing_combined:
-        if not existing_combined.pdf_path:
-            try:
-                existing_combined.pdf_path = generate_invoice_pdf(existing_combined, _parse_items(existing_combined))
-                db.flush()
-                generated.append({"partner_name": team.name, "action": "pdf_added", "type": "combined",
-                                   "amount": _effective_total(existing_combined)})
-            except Exception as exc:
-                print(f"[gen] Combined PDF regen {team.name}: {exc}")
-        return generated
-
     # Build line items
     items: list[dict] = []
     section_notes: list[str] = []
@@ -757,6 +684,52 @@ def _generate_for_team(team: Team, financial_year: str, db: Session) -> list:
         "email":      getattr(team, "partner_email", "") or "",
     })
 
+    if existing_combined:
+        # ── UPDATE existing combined invoice with fresh totals ──────────
+        # Recalculate so any new top-ups (or newly detected overage) added
+        # since this invoice was first generated get folded in, instead of
+        # being silently lost.
+        old_total = float(existing_combined.total_amount or 0)
+
+        existing_combined.amount          = sub_total
+        existing_combined.gst_amount      = gst_amount
+        existing_combined.total_amount    = total_amount
+        existing_combined.notes           = "; ".join(section_notes)
+        existing_combined.items_json      = json.dumps(items)
+        existing_combined.partner_details = partner_details
+
+        if total_amount > old_total:
+            paid = float(existing_combined.paid_amount or 0)
+            if paid <= 0:
+                existing_combined.payment_status = "unpaid"
+                existing_combined.status         = "unpaid"
+            elif paid < total_amount:
+                existing_combined.payment_status = "partial"
+                existing_combined.status         = "partial"
+
+        db.flush()
+
+        try:
+            existing_combined.pdf_path = generate_invoice_pdf(existing_combined, items)
+            db.flush()
+        except Exception as exc:
+            print(f"[gen] Combined PDF regen {team.name}: {exc}")
+
+        # Only now that the combined invoice's items include every topup
+        # row is it safe to remove the original standalone invoices.
+        _delete_superseded_standalone_invoices(db, team.id, financial_year, exclude_id=existing_combined.id)
+
+        if total_amount != old_total:
+            generated.append({
+                "partner_name": team.name,
+                "action":       "updated",
+                "type":         "combined",
+                "amount":       total_amount,
+                "items":        len(items),
+            })
+        return generated
+
+    # ── CREATE new combined invoice ─────────────────────────────────────
     inv = Invoice(
         invoice_number  = _make_inv_number(financial_year, team.id, "CMB"),
         partner_name    = team.name,
@@ -785,6 +758,8 @@ def _generate_for_team(team: Team, financial_year: str, db: Session) -> list:
         print(f"[gen] PDF failed {team.name}: {exc}")
         inv.pdf_path = None
 
+    _delete_superseded_standalone_invoices(db, team.id, financial_year, exclude_id=inv.id)
+
     generated.append({
         "partner_name": team.name,
         "action":       "created",
@@ -794,7 +769,38 @@ def _generate_for_team(team: Team, financial_year: str, db: Session) -> list:
     })
     return generated
 
+def _delete_superseded_standalone_invoices(
+    db: Session, team_id: int, financial_year: str, exclude_id: int | None = None
+) -> None:
+    """
+    Removes standalone 'topup' and 'overage' invoices for a team+FY once
+    their amounts have been folded into a combined invoice — leaving them
+    around creates confusing duplicates. Only call this AFTER the combined
+    invoice's items/total have been (re)computed from these same rows.
+    """
+    query = db.query(Invoice).filter(
+        Invoice.team_id        == team_id,
+        Invoice.financial_year == financial_year,
+        Invoice.invoice_type.in_(["topup", "overage"]),
+    )
+    if exclude_id is not None:
+        query = query.filter(Invoice.id != exclude_id)
 
+    stale_invoices = query.all()
+    for stale in stale_invoices:
+        pdf = stale.pdf_path or ""
+        if pdf.startswith("/static/invoices/"):
+            local = os.path.join(BASE_DIR, pdf.lstrip("/"))
+            try:
+                if os.path.exists(local):
+                    os.remove(local)
+            except Exception as exc:
+                print(f"[gen] Could not remove stale PDF for invoice {stale.id}: {exc}")
+        db.delete(stale)
+
+    if stale_invoices:
+        db.flush()
+        print(f"[gen] Removed {len(stale_invoices)} superseded standalone invoice(s) for team {team_id}, FY {financial_year}")
 def _make_inv_number(financial_year: str, team_id: int, prefix: str = "INV") -> str:
     fy_short = financial_year.replace("-", "")
     ts       = int(datetime.now().timestamp())
