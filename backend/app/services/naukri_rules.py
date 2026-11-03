@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.config import ALGORITHM, SECRET_KEY
 from app.models.audit import AuditLog
-from app.models.inventory_adjustment import InventoryAdjustment
 from app.models.financial_year import FinancialYear
 from app.models.invoice import Invoice
 from app.models.pricing import PricingPlan
@@ -384,26 +383,15 @@ def team_limits(
     db: Session,
     financial_year: str
 ) -> dict:
-    # Same logic as the alerts list: stored limit is already the TOTAL
-    # (base x licences), so add top-ups and adjustments on top.
-    topups = topup_totals(db, team.id, financial_year)
-    adj_rows = (
-        db.query(InventoryAdjustment)
-        .filter(
-            InventoryAdjustment.team_id == team.id,
-            InventoryAdjustment.financial_year == financial_year,
-        )
-        .all()
+    limits = effective_limits(
+        team,
+        db,
+        financial_year
     )
-    adj = {
-        "cv": sum(r.cv_adjustment or 0 for r in adj_rows),
-        "nvites": sum(r.nvites_adjustment or 0 for r in adj_rows),
-        "jobs": sum(r.jobs_adjustment or 0 for r in adj_rows),
-    }
     return {
-        "cv": (team.cv_limit or 0) + topups["cv"] + adj["cv"],
-        "nvites": (team.nvites_limit or 0) + topups["nvites"] + adj["nvites"],
-        "jobs": (team.jobs_limit or 0) + topups["jobs"] + adj["jobs"],
+        "cv": limits["cv_limit"],
+        "nvites": limits["nvites_limit"],
+        "jobs": limits["jobs_limit"],
     }
 
 
