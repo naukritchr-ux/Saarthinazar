@@ -252,12 +252,9 @@ function buildJobsMessage(a: AlertTeam): string {
     : formatFYDuration(a.financial_year || "");
   const endDate = getFYEndDate(a.financial_year || "");
 
-  const jobsBase = a.jobs_limit_base || 0;
-  const topupList: number[] = a.topup_jobs_list || [];
-  const topupTotal = a.topup_jobs_total || 0;
-  const totalPurchase = jobsBase + topupTotal;
+  const jobsLimit = a.jobs_limit || 0;
   const totalJobsUsage = a.jobs_usage || 0;
-  const overUse = Math.max(0, totalJobsUsage - totalPurchase);
+  const overUse = Math.max(0, totalJobsUsage - jobsLimit);
   const billedBlock = overUse > 0 ? Math.ceil(overUse / JOBS_BLOCK) * JOBS_BLOCK : 0;
   const cost = billedBlock * JOBS_RATE;
 
@@ -280,17 +277,7 @@ function buildJobsMessage(a: AlertTeam): string {
     lines.push(`Usage: ${totalJobsUsage.toLocaleString("en-IN")}`);
   }
 
-  lines.push(`Initial Purchase: ${jobsBase.toLocaleString("en-IN")}`);
-
-  if (topupList.length > 1) {
-    lines.push(`Extra Purchase: ${topupList.join("+")}= ${topupTotal.toLocaleString("en-IN")}`);
-  } else if (topupList.length === 1) {
-    lines.push(`Extra Purchase: ${topupList[0]}`);
-  } else {
-    lines.push(`Extra Purchase: 0`);
-  }
-
-  lines.push(`Total Purchase: ${totalPurchase.toLocaleString("en-IN")}`);
+  lines.push(`Job Posting Limit: ${jobsLimit.toLocaleString("en-IN")}`);
 
   if (overUse > 0) {
     lines.push(`Over Use: ${overUse.toLocaleString("en-IN")}`);
