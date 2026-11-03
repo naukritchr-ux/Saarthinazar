@@ -8,7 +8,7 @@ pandas
 openpyxl
 bcrypt==4.0.1
 passlib[bcrypt]==1.7.4
-xlrd==2.0.1
+xlrd==2.0.2
 psycopg2-binary
 google-api-python-client
 google-auth
