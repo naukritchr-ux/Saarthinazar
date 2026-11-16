@@ -101,11 +101,10 @@ function buildCvMessage(a: AlertTeam): string {
     : formatFYDuration(a.financial_year || "");
   const endDate = getFYEndDate(a.financial_year || "");
 
-  const licences = a.licence_count || 1;
   const cvBase = a.cv_limit_base || 0;
   const topupList: number[] = a.topup_cv_list || [];
   const topupTotal = a.topup_cv_total || 0;
-  const baseTotal = cvBase * licences;
+  const baseTotal = cvBase; // already the total across all licences
   const totalPurchase = baseTotal + topupTotal;
   const totalCvUsage = a.cv_usage;
   const overUse = Math.max(0, totalCvUsage - totalPurchase);
@@ -129,11 +128,7 @@ function buildCvMessage(a: AlertTeam): string {
     lines.push(`*Usage*: ${totalCvUsage.toLocaleString("en-IN")}`);
   }
 
-  if (licences > 1) {
-    lines.push(`*Initial Purchase*: ${cvBase} x ${licences} = Rs ${baseTotal.toLocaleString("en-IN")}`);
-  } else {
-    lines.push(`*Initial Purchase*: ${cvBase.toLocaleString("en-IN")}`);
-  }
+  lines.push(`*Initial Purchase*: ${baseTotal.toLocaleString("en-IN")}`);
 
   if (topupList.length > 1) {
     lines.push(`*Extra Purchase*: ${topupList.join("+")}= ${topupTotal.toLocaleString("en-IN")}`);
@@ -180,11 +175,10 @@ function buildNvitesMessage(a: AlertTeam): string {
     : formatFYDuration(a.financial_year || "");
   const endDate = getFYEndDate(a.financial_year || "");
 
-  const licences = a.licence_count || 1;
   const nvitesBase = a.nvites_limit_base || 0;
   const topupList: number[] = a.topup_nvites_list || [];
   const topupTotal = a.topup_nvites_total || 0;
-  const baseTotal = nvitesBase * licences;
+  const baseTotal = nvitesBase; // already the total across all licences
   const totalPurchase = baseTotal + topupTotal;
   const totalNvitesUsage = a.nvites_usage;
   const overUse = Math.max(0, totalNvitesUsage - totalPurchase);
@@ -208,11 +202,7 @@ function buildNvitesMessage(a: AlertTeam): string {
     lines.push(`Usage: ${totalNvitesUsage.toLocaleString("en-IN")}`);
   }
 
-  if (licences > 1) {
-    lines.push(`Initial Purchase: ${nvitesBase} x ${licences} = ${baseTotal.toLocaleString("en-IN")}`);
-  } else {
-    lines.push(`Initial Purchase: ${nvitesBase.toLocaleString("en-IN")}`);
-  }
+  lines.push(`Initial Purchase: ${baseTotal.toLocaleString("en-IN")}`);
 
   if (topupList.length > 1) {
     lines.push(`Extra Purchase: ${topupList.join("+")}= ${topupTotal.toLocaleString("en-IN")}`);
